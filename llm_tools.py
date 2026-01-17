@@ -151,21 +151,95 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+]
+
+# For Responses API - internally-tagged function format (different from Chat Completions)
+TOOL_DEFINITIONS_RESPONSES = [
+    {"type": "web_search"},  # OpenAI's built-in web search
     {
         "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": "Search the web for current information. Use when the user asks about recent events, unfamiliar topics, or needs up-to-date data.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query",
-                    },
+        "name": "create_graph",
+        "description": "Create a new empty graph. Call this FIRST, then add nodes one by one with add_node, then add edges with add_edge.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Title of the graph"},
+                "graph_type": {
+                    "type": "string",
+                    "enum": ["causal_loop", "mind_map", "concept_map", "systems_thinking"],
+                    "description": "Type of graph",
                 },
-                "required": ["query"],
             },
+            "required": ["title", "graph_type"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "add_node",
+        "description": "Add a node to the graph.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {"type": "string", "description": "ID of the graph"},
+                "id": {"type": "string", "description": "Unique descriptive node ID (e.g., 'central_ai', 'core_nlp', 'branch_transformers')"},
+                "label": {"type": "string", "description": "Display label (2-5 words)"},
+                "level": {"type": "integer", "description": "Hierarchy level: 0=central topic, 1=core concepts, 2=branches, 3=details, 4+=deeper"},
+            },
+            "required": ["artifact_id", "id", "label", "level"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "add_edge",
+        "description": "Add a single edge/relationship. Call this multiple times, once for each relationship.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {"type": "string", "description": "ID of the graph"},
+                "source": {"type": "string", "description": "Source node ID"},
+                "target": {"type": "string", "description": "Target node ID"},
+                "relationship_type": {
+                    "type": "string",
+                    "enum": ["causal_positive", "causal_negative", "related", "contains", "influences"],
+                    "description": "causal_positive (+), causal_negative (-), related, contains, influences",
+                },
+            },
+            "required": ["artifact_id", "source", "target", "relationship_type"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "finish_graph",
+        "description": "Call this when done adding all nodes and edges to finalize the graph layout.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {"type": "string", "description": "ID of the graph"},
+            },
+            "required": ["artifact_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "list_graphs",
+        "description": "List all graph artifacts in the workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "type": "function",
+        "name": "fetch_url",
+        "description": "Fetch and extract text content from a webpage URL. Large pages are automatically split into chunks. Call with chunk_index=0 first to see total chunks available, then fetch additional chunks if needed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The full URL to fetch (including http:// or https://)"},
+                "chunk_index": {"type": "integer", "description": "Which chunk to retrieve (0-based). Default is 0 for first chunk.", "default": 0},
+                "chunk_size": {"type": "integer", "description": "Characters per chunk. Default is 15000.", "default": 15000},
+            },
+            "required": ["url"],
         },
     },
 ]
@@ -178,6 +252,7 @@ class ToolExecutor:
         self.store = store
         self.workspace_id = workspace_id
         self.pending_events: List[Dict[str, Any]] = []  # Events to stream incrementally
+        self.url_cache: Dict[str, Dict[str, Any]] = {}  # Cache fetched URLs for pagination
 
     def get_pending_events(self) -> List[Dict[str, Any]]:
         """Get and clear pending incremental events."""
@@ -208,8 +283,8 @@ class ToolExecutor:
             return self._get_graph(arguments)
         elif tool_name == "list_graphs":
             return self._list_graphs()
-        elif tool_name == "web_search":
-            return self._web_search(arguments)
+        elif tool_name == "fetch_url":
+            return self._fetch_url(arguments)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
 
@@ -535,61 +610,109 @@ class ToolExecutor:
                 })
         return {"graphs": graphs}
 
-    def _web_search(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Search the web using a simple implementation."""
-        import requests
-        from bs4 import BeautifulSoup
+    def _fetch_url(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Fetch and extract text content from a URL with pagination support."""
+        url = args.get("url")
+        chunk_index = args.get("chunk_index", 0)
+        chunk_size = args.get("chunk_size", 15000)
         
-        query = args.get("query", "")
-        if not query:
-            return {"error": "No query provided"}
+        if not url:
+            return {"error": "No URL provided"}
         
         try:
-            # Use DuckDuckGo HTML search (no API key needed)
-            search_url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
+            import requests
+            from bs4 import BeautifulSoup
+            import math
             
-            response = requests.get(search_url, headers=headers, timeout=10)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            results = []
-            
-            # Parse search results
-            for result in soup.find_all('div', class_='result', limit=5):
-                title_elem = result.find('a', class_='result__a')
-                snippet_elem = result.find('a', class_='result__snippet')
-                
-                if title_elem:
-                    title = title_elem.get_text(strip=True)
-                    url = title_elem.get('href', '')
-                    snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
-                    
-                    results.append({
-                        "title": title,
-                        "url": url,
-                        "snippet": snippet
-                    })
-            
-            if not results:
-                return {
-                    "success": True,
-                    "query": query,
-                    "results": [],
-                    "message": f"No results found for '{query}'"
+            # Check if we already have this URL cached
+            if url not in self.url_cache:
+                # Fetch the URL for the first time
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (compatible; WorkspaceBot/1.0)"
                 }
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()
+                
+                # Parse HTML and extract text
+                soup = BeautifulSoup(response.content, 'html.parser')
+                
+                # Remove script and style elements
+                for script in soup(["script", "style", "nav", "footer", "header"]):
+                    script.decompose()
+                
+                # Get text
+                text = soup.get_text(separator='\n', strip=True)
+                
+                # Clean up whitespace
+                lines = (line.strip() for line in text.splitlines())
+                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                full_text = '\n'.join(chunk for chunk in chunks if chunk)
+                
+                # Get page title
+                title = soup.title.string if soup.title else "Untitled"
+                
+                # Cache the full content
+                self.url_cache[url] = {
+                    "title": title,
+                    "full_text": full_text,
+                    "total_length": len(full_text),
+                }
+                
+                self._emit_incremental("url_fetched", {
+                    "url": url,
+                    "title": title,
+                    "total_length": len(full_text),
+                })
+            
+            # Get cached data
+            cached = self.url_cache[url]
+            full_text = cached["full_text"]
+            title = cached["title"]
+            total_length = cached["total_length"]
+            
+            # Calculate chunking
+            total_chunks = math.ceil(total_length / chunk_size)
+            
+            # Validate chunk_index
+            if chunk_index < 0 or chunk_index >= total_chunks:
+                return {
+                    "error": f"Invalid chunk_index {chunk_index}. Valid range: 0-{total_chunks - 1}",
+                    "url": url,
+                    "total_chunks": total_chunks,
+                }
+            
+            # Extract the requested chunk
+            start_pos = chunk_index * chunk_size
+            end_pos = min(start_pos + chunk_size, total_length)
+            chunk_content = full_text[start_pos:end_pos]
+            
+            # Emit event for chunk retrieval
+            if chunk_index > 0:
+                self._emit_incremental("url_chunk_retrieved", {
+                    "url": url,
+                    "chunk_index": chunk_index,
+                    "chunk_size": len(chunk_content),
+                })
             
             return {
                 "success": True,
-                "query": query,
-                "results": results,
-                "message": f"Found {len(results)} results for '{query}'"
+                "url": url,
+                "title": title,
+                "content": chunk_content,
+                "chunk_index": chunk_index,
+                "chunk_size": len(chunk_content),
+                "total_chunks": total_chunks,
+                "total_length": total_length,
+                "has_more": chunk_index < total_chunks - 1,
             }
             
+        except requests.RequestException as e:
+            return {
+                "error": f"Failed to fetch URL: {str(e)}",
+                "url": url,
+            }
         except Exception as e:
             return {
-                "error": f"Search failed: {str(e)}",
-                "query": query
+                "error": f"Failed to process URL: {str(e)}",
+                "url": url,
             }

@@ -81,6 +81,11 @@ class EventListResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User message to send to the AI")
+    url: Optional[str] = Field(default=None, description="Optional URL for the AI to fetch and analyze")
+    force_web_search: bool = Field(default=False, description="Force the AI to use web search for current information")
+    enable_file_search: bool = Field(default=True, description="Enable file search in workspace vector stores")
+    max_file_search_results: Optional[int] = Field(default=None, description="Maximum number of file search results to retrieve")
+    include_file_search_results: bool = Field(default=False, description="Include raw file search results in response")
 
 
 class ChatMessageResponse(BaseModel):
@@ -118,3 +123,32 @@ class GraphData(BaseModel):
     edges: List[GraphEdge] = []
     graph_type: str = "concept_map"  # "concept_map", "causal_loop", "mind_map", "systems_thinking"
     metadata: Dict[str, Any] = {}
+
+
+class VectorStoreCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200, description="Name for the vector store")
+
+
+class VectorStoreResponse(BaseModel):
+    id: str
+    workspace_id: str
+    name: str
+    openai_vector_store_id: str
+    created_at: datetime
+
+
+class VectorStoreListResponse(BaseModel):
+    vector_stores: List[VectorStoreResponse]
+
+
+class VectorStoreFileResponse(BaseModel):
+    id: str
+    vector_store_id: str
+    openai_file_id: str
+    filename: str
+    status: str
+    created_at: datetime
+
+
+class VectorStoreFileListResponse(BaseModel):
+    files: List[VectorStoreFileResponse]

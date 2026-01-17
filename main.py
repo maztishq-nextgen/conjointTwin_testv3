@@ -2,12 +2,14 @@ import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+import openai
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from agent import ChatAgent, format_chat_sse
+from agent_responses import ChatAgentResponses, format_chat_sse
+from config import OPENAI_API_KEY
 from schemas import (
     ArtifactCreateRequest,
     ArtifactListResponse,
@@ -19,6 +21,11 @@ from schemas import (
     EventListResponse,
     EventResponse,
     MessageListResponse,
+    VectorStoreCreate,
+    VectorStoreResponse,
+    VectorStoreListResponse,
+    VectorStoreFileResponse,
+    VectorStoreFileListResponse,
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspacesResponse,
@@ -40,6 +47,7 @@ app.add_middleware(
 )
 
 store = WorkspaceStore()
+openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 
 def require_workspace(workspace_id: str) -> Dict[str, Any]:
@@ -213,10 +221,17 @@ async def delete_artifact(workspace_id: str, artifact_id: str):
 @app.post("/workspaces/{workspace_id}/chat")
 async def chat_with_workspace(workspace_id: str, request: ChatRequest, req: Request):
     require_workspace(workspace_id)
-    agent = ChatAgent(store, workspace_id)
+    agent = ChatAgentResponses(store, workspace_id)
 
     async def stream_generator():
-        async for event in agent.chat_stream(request.message):
+        async for event in agent.chat_stream(
+            request.message,
+            url=request.url,
+            force_web_search=request.force_web_search,
+            enable_file_search=request.enable_file_search,
+            max_file_search_results=request.max_file_search_results,
+            include_file_search_results=request.include_file_search_results,
+        ):
             yield format_chat_sse(event)
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
@@ -233,6 +248,117 @@ async def list_workspace_messages(workspace_id: str, limit: int = 50):
 async def clear_workspace_messages(workspace_id: str):
     require_workspace(workspace_id)
     store.clear_messages(workspace_id)
+    return
+
+
+@app.post("/workspaces/{workspace_id}/vector-stores", response_model=VectorStoreResponse)
+async def create_vector_store(workspace_id: str, request: VectorStoreCreate):
+    require_workspace(workspace_id)
+    
+    vector_store = openai_client.vector_stores.create(name=request.name)
+    
+    db_vector_store = store.create_vector_store(
+        workspace_id=workspace_id,
+        name=request.name,
+        openai_vector_store_id=vector_store.id,
+    )
+    
+    store.create_event(
+        workspace_id=workspace_id,
+        event_type="vector_store_created",
+        payload={"name": request.name, "vector_store_id": db_vector_store["id"]},
+    )
+    
+    return db_vector_store
+
+
+@app.get("/workspaces/{workspace_id}/vector-stores", response_model=VectorStoreListResponse)
+async def list_vector_stores(workspace_id: str):
+    require_workspace(workspace_id)
+    vector_stores = store.list_vector_stores(workspace_id)
+    return {"vector_stores": vector_stores}
+
+
+@app.get("/workspaces/{workspace_id}/vector-stores/{vector_store_id}", response_model=VectorStoreResponse)
+async def get_vector_store(workspace_id: str, vector_store_id: str):
+    require_workspace(workspace_id)
+    vector_store = store.get_vector_store(vector_store_id)
+    if not vector_store or vector_store["workspace_id"] != workspace_id:
+        raise HTTPException(status_code=404, detail="Vector store not found")
+    return vector_store
+
+
+@app.post("/workspaces/{workspace_id}/vector-stores/{vector_store_id}/files", response_model=VectorStoreFileResponse)
+async def upload_file_to_vector_store(workspace_id: str, vector_store_id: str, file: UploadFile = File(...)):
+    require_workspace(workspace_id)
+    
+    vector_store = store.get_vector_store(vector_store_id)
+    if not vector_store or vector_store["workspace_id"] != workspace_id:
+        raise HTTPException(status_code=404, detail="Vector store not found")
+    
+    file_content = await file.read()
+    
+    openai_file = openai_client.files.create(
+        file=(file.filename, file_content),
+        purpose="assistants"
+    )
+    
+    openai_client.vector_stores.files.create(
+        vector_store_id=vector_store["openai_vector_store_id"],
+        file_id=openai_file.id
+    )
+    
+    db_file = store.add_vector_store_file(
+        vector_store_id=vector_store_id,
+        openai_file_id=openai_file.id,
+        filename=file.filename or "unknown",
+        status="completed"
+    )
+    
+    store.create_event(
+        workspace_id=workspace_id,
+        event_type="vector_store_file_uploaded",
+        payload={"vector_store_id": vector_store_id, "filename": file.filename},
+    )
+    
+    return db_file
+
+
+@app.get("/workspaces/{workspace_id}/vector-stores/{vector_store_id}/files", response_model=VectorStoreFileListResponse)
+async def list_vector_store_files(workspace_id: str, vector_store_id: str):
+    require_workspace(workspace_id)
+    
+    vector_store = store.get_vector_store(vector_store_id)
+    if not vector_store or vector_store["workspace_id"] != workspace_id:
+        raise HTTPException(status_code=404, detail="Vector store not found")
+    
+    files = store.list_vector_store_files(vector_store_id)
+    return {"files": files}
+
+
+@app.delete("/workspaces/{workspace_id}/vector-stores/{vector_store_id}", status_code=204)
+async def delete_vector_store(workspace_id: str, vector_store_id: str):
+    require_workspace(workspace_id)
+    
+    vector_store = store.get_vector_store(vector_store_id)
+    if not vector_store or vector_store["workspace_id"] != workspace_id:
+        raise HTTPException(status_code=404, detail="Vector store not found")
+    
+    try:
+        openai_client.vector_stores.delete(vector_store["openai_vector_store_id"])
+    except Exception:
+        pass
+    
+    deleted = store.delete_vector_store(vector_store_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Vector store not found")
+    
+    store.create_event(
+        workspace_id=workspace_id,
+        event_type="vector_store_deleted",
+        payload={"vector_store_id": vector_store_id},
+    )
+    
     return
 
 

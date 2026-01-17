@@ -1,0 +1,578 @@
+---
+title: "File Search"
+description: "Enable semantic search across your workspace documents using OpenAI's file search capability"
+---
+
+## Overview
+
+File search allows the AI model to retrieve relevant information from your uploaded documents before generating responses. This is powered by OpenAI's hosted file search tool, which performs semantic and keyword search across vector stores containing your files.
+
+<Note>
+File search is automatically enabled for all workspaces that have vector stores with uploaded files. The AI will use this capability when it needs to reference your documents.
+</Note>
+
+## How it works
+
+File search uses vector stores to index your documents:
+
+1. **Create a vector store** in your workspace
+2. **Upload files** to the vector store (OpenAI processes and indexes them)
+3. **Enable file search** in chat requests (enabled by default)
+4. The AI automatically searches your files when relevant and cites them in responses
+
+## Supported file types
+
+| File format | MIME type |
+|-------------|-----------|
+| .txt | text/plain |
+| .md | text/markdown |
+| .pdf | application/pdf |
+| .doc | application/msword |
+| .docx | application/vnd.openxmlformats-officedocument.wordprocessingml.document |
+| .html | text/html |
+| .json | application/json |
+| .py | text/x-python |
+| .js | text/javascript |
+| .ts | application/typescript |
+| .java | text/x-java |
+| .cpp | text/x-c++ |
+| .c | text/x-c |
+| .cs | text/x-csharp |
+| .go | text/x-golang |
+| .rb | text/x-ruby |
+| .php | text/x-php |
+| .css | text/css |
+| .sh | application/x-sh |
+| .tex | text/x-tex |
+| .pptx | application/vnd.openxmlformats-officedocument.presentationml.presentation |
+
+<Warning>
+For text files, encoding must be UTF-8, UTF-16, or ASCII. Maximum file size is 512MB.
+</Warning>
+
+## Setup workflow
+
+<Steps>
+
+### Create a vector store
+
+Create a vector store to hold your documents.
+
+<CodeGroup>
+```python Python
+import requests
+
+workspace_id = "your-workspace-id"
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/vector-stores",
+    json={"name": "Product Documentation"}
+)
+vector_store = response.json()
+print(f"Created vector store: {vector_store['id']}")
+```
+
+```javascript JavaScript
+const workspaceId = "your-workspace-id";
+const response = await fetch(
+    `http://localhost:8000/workspaces/${workspaceId}/vector-stores`,
+    {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name: "Product Documentation"})
+    }
+);
+const vectorStore = await response.json();
+console.log(`Created vector store: ${vectorStore.id}`);
+```
+
+```bash cURL
+curl -X POST http://localhost:8000/workspaces/{workspace_id}/vector-stores \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Product Documentation"}'
+```
+</CodeGroup>
+
+<Check>
+You should receive a response with the vector store ID, which you'll use to upload files.
+</Check>
+
+### Upload files
+
+Upload documents to your vector store for indexing.
+
+<CodeGroup>
+```python Python
+import requests
+
+vector_store_id = "your-vector-store-id"
+
+with open("documentation.pdf", "rb") as file:
+    response = requests.post(
+        f"http://localhost:8000/workspaces/{workspace_id}/vector-stores/{vector_store_id}/files",
+        files={"file": file}
+    )
+
+file_record = response.json()
+print(f"Uploaded file: {file_record['filename']}")
+```
+
+```javascript JavaScript
+const vectorStoreId = "your-vector-store-id";
+const formData = new FormData();
+formData.append("file", fileBlob, "documentation.pdf");
+
+const response = await fetch(
+    `http://localhost:8000/workspaces/${workspaceId}/vector-stores/${vectorStoreId}/files`,
+    {
+        method: "POST",
+        body: formData
+    }
+);
+const fileRecord = await response.json();
+console.log(`Uploaded file: ${fileRecord.filename}`);
+```
+
+```bash cURL
+curl -X POST http://localhost:8000/workspaces/{workspace_id}/vector-stores/{vector_store_id}/files \
+  -F "file=@documentation.pdf"
+```
+</CodeGroup>
+
+<Check>
+Files are automatically processed and indexed by OpenAI. This typically completes within seconds.
+</Check>
+
+### Use file search in chat
+
+File search is enabled by default. The AI will automatically search your files when relevant.
+
+<CodeGroup>
+```python Python
+import requests
+
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/chat",
+    json={
+        "message": "What are the key features in our product documentation?",
+        "enable_file_search": True,
+        "include_file_search_results": False
+    },
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line:
+        print(line.decode())
+```
+
+```javascript JavaScript
+const response = await fetch(
+    `http://localhost:8000/workspaces/${workspaceId}/chat`,
+    {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            message: "What are the key features in our product documentation?",
+            enable_file_search: true,
+            include_file_search_results: false
+        })
+    }
+);
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    console.log(decoder.decode(value));
+}
+```
+
+```bash cURL
+curl -X POST http://localhost:8000/workspaces/{workspace_id}/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What are the key features in our product documentation?",
+    "enable_file_search": true,
+    "include_file_search_results": false
+  }' \
+  --no-buffer
+```
+</CodeGroup>
+
+</Steps>
+
+## Chat response format
+
+When file search is used, you'll receive additional event types in the SSE stream:
+
+### File search call event
+
+Emitted when the AI searches your files:
+
+```json
+{
+  "type": "file_search_call",
+  "file_search_id": "fs_abc123",
+  "status": "completed",
+  "queries": ["product features", "key capabilities"],
+  "search_results": null
+}
+```
+
+### Content with annotations
+
+When the AI references files, annotations are included:
+
+```json
+{
+  "type": "content",
+  "content": "According to the documentation, the key features include...",
+  "annotations": [
+    {
+      "type": "file_citation",
+      "index": 45,
+      "file_id": "file-xyz789",
+      "filename": "documentation.pdf"
+    }
+  ]
+}
+```
+
+<Tip>
+Use annotations to display citations in your UI, linking back to source documents.
+</Tip>
+
+## Customization options
+
+### Limit search results
+
+Control the number of results retrieved to reduce latency and token usage:
+
+```json
+{
+  "message": "Your question",
+  "enable_file_search": true,
+  "max_file_search_results": 5
+}
+```
+
+<Warning>
+Limiting results may reduce answer quality for complex queries requiring multiple sources.
+</Warning>
+
+### Include raw search results
+
+Get the actual search results for debugging or custom processing:
+
+```json
+{
+  "message": "Your question",
+  "enable_file_search": true,
+  "include_file_search_results": true
+}
+```
+
+### Disable file search
+
+Disable file search for specific requests:
+
+```json
+{
+  "message": "Your question",
+  "enable_file_search": false
+}
+```
+
+## API Reference
+
+### Create vector store
+
+<ParamField path="workspace_id" type="string" required>
+  ID of the workspace
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Name for the vector store (1-200 characters)
+</ParamField>
+
+<RequestExample>
+```bash
+POST /workspaces/{workspace_id}/vector-stores
+Content-Type: application/json
+
+{
+  "name": "Product Documentation"
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "vs_abc123",
+  "workspace_id": "ws_xyz789",
+  "name": "Product Documentation",
+  "openai_vector_store_id": "vs_openai_def456",
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+```json Error
+{
+  "detail": "Workspace not found"
+}
+```
+</ResponseExample>
+
+### Upload file to vector store
+
+<ParamField path="workspace_id" type="string" required>
+  ID of the workspace
+</ParamField>
+
+<ParamField path="vector_store_id" type="string" required>
+  ID of the vector store
+</ParamField>
+
+<ParamField body="file" type="file" required>
+  File to upload (multipart/form-data)
+</ParamField>
+
+<RequestExample>
+```bash
+POST /workspaces/{workspace_id}/vector-stores/{vector_store_id}/files
+Content-Type: multipart/form-data
+
+file=@documentation.pdf
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "vsf_abc123",
+  "vector_store_id": "vs_xyz789",
+  "openai_file_id": "file-def456",
+  "filename": "documentation.pdf",
+  "status": "completed",
+  "created_at": "2024-01-15T10:35:00Z"
+}
+```
+
+```json Error
+{
+  "detail": "Vector store not found"
+}
+```
+</ResponseExample>
+
+### List vector stores
+
+<ParamField path="workspace_id" type="string" required>
+  ID of the workspace
+</ParamField>
+
+<RequestExample>
+```bash
+GET /workspaces/{workspace_id}/vector-stores
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "vector_stores": [
+    {
+      "id": "vs_abc123",
+      "workspace_id": "ws_xyz789",
+      "name": "Product Documentation",
+      "openai_vector_store_id": "vs_openai_def456",
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### List files in vector store
+
+<ParamField path="workspace_id" type="string" required>
+  ID of the workspace
+</ParamField>
+
+<ParamField path="vector_store_id" type="string" required>
+  ID of the vector store
+</ParamField>
+
+<RequestExample>
+```bash
+GET /workspaces/{workspace_id}/vector-stores/{vector_store_id}/files
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "files": [
+    {
+      "id": "vsf_abc123",
+      "vector_store_id": "vs_xyz789",
+      "openai_file_id": "file-def456",
+      "filename": "documentation.pdf",
+      "status": "completed",
+      "created_at": "2024-01-15T10:35:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Delete vector store
+
+<ParamField path="workspace_id" type="string" required>
+  ID of the workspace
+</ParamField>
+
+<ParamField path="vector_store_id" type="string" required>
+  ID of the vector store to delete
+</ParamField>
+
+<RequestExample>
+```bash
+DELETE /workspaces/{workspace_id}/vector-stores/{vector_store_id}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+204 No Content
+```
+
+```json Error
+{
+  "detail": "Vector store not found"
+}
+```
+</ResponseExample>
+
+### Chat with file search
+
+<ParamField path="workspace_id" type="string" required>
+  ID of the workspace
+</ParamField>
+
+<ParamField body="message" type="string" required>
+  User message to send to the AI
+</ParamField>
+
+<ParamField body="enable_file_search" type="boolean" default={true}>
+  Enable file search in workspace vector stores
+</ParamField>
+
+<ParamField body="max_file_search_results" type="integer">
+  Maximum number of file search results to retrieve
+</ParamField>
+
+<ParamField body="include_file_search_results" type="boolean" default={false}>
+  Include raw file search results in response
+</ParamField>
+
+<ParamField body="force_web_search" type="boolean" default={false}>
+  Force web search for current information
+</ParamField>
+
+<RequestExample>
+```bash
+POST /workspaces/{workspace_id}/chat
+Content-Type: application/json
+
+{
+  "message": "What are the key features?",
+  "enable_file_search": true,
+  "max_file_search_results": 5,
+  "include_file_search_results": false
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```text Success (SSE Stream)
+event: thinking_start
+data: {"type":"thinking_start","content":""}
+
+event: thinking_end
+data: {"type":"thinking_end","content":""}
+
+event: file_search_call
+data: {"type":"file_search_call","file_search_id":"fs_abc","status":"completed","queries":["key features"]}
+
+event: content
+data: {"type":"content","content":"The key features include...","annotations":[{"type":"file_citation","index":20,"file_id":"file-xyz","filename":"docs.pdf"}]}
+
+event: done
+data: {"type":"done","content":"Complete response text"}
+```
+</ResponseExample>
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Organize by topic" icon="folder">
+    Create separate vector stores for different document categories (e.g., "Product Docs", "API Reference", "User Guides")
+  </Card>
+  
+  <Card title="Keep files updated" icon="arrows-rotate">
+    Delete outdated files and upload new versions to ensure the AI has current information
+  </Card>
+  
+  <Card title="Use descriptive names" icon="tag">
+    Name vector stores and files clearly so you can manage them easily
+  </Card>
+  
+  <Card title="Monitor usage" icon="chart-line">
+    Track which files are being cited most frequently to optimize your knowledge base
+  </Card>
+</CardGroup>
+
+## Pricing
+
+File search usage is billed by OpenAI based on:
+- **Storage**: $0.10 per GB per day of vector storage
+- **Usage**: Included in standard API request costs
+
+<Tip>
+Vector stores can be shared across multiple chat sessions, making them cost-effective for frequently accessed documents.
+</Tip>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Files not being found in search">
+    - Verify files were successfully uploaded using the list files endpoint
+    - Ensure file format is supported (see supported file types table)
+    - Check that file encoding is UTF-8, UTF-16, or ASCII for text files
+    - Try more specific or broader search terms
+  </Accordion>
+
+  <Accordion title="No file search events in chat response">
+    - Confirm `enable_file_search` is set to `true` (default)
+    - Verify the workspace has at least one vector store with files
+    - Check that your question relates to document content
+    - The AI may not search if it can answer from its training data
+  </Accordion>
+
+  <Accordion title="Upload fails with encoding error">
+    - Convert text files to UTF-8 encoding
+    - Verify file is not corrupted
+    - Check file size is under 512MB
+    - Try a different file format if available
+  </Accordion>
+
+  <Accordion title="Annotations not appearing">
+    - Ensure you're processing the `annotations` field in content events
+    - Verify files were successfully indexed in the vector store
+    - Check that the AI is actually using file search (look for `file_search_call` events)
+  </Accordion>
+</AccordionGroup>

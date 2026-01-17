@@ -3,7 +3,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import openai
 
-from config import OPENAI_API_KEY, OPENAI_MODEL
+from config import OPENAI_API_KEY, OPENAI_MODEL, USE_WEB_SEARCH, SEARCH_MODEL
 from cost_tracker import cost_tracker
 from llm_tools import TOOL_DEFINITIONS, ToolExecutor
 from workspace_store import WorkspaceStore
@@ -149,11 +149,14 @@ class ChatAgent:
 
         messages = self._build_messages(user_message)
         
+        # Use search-enabled model if web search is enabled
+        model = SEARCH_MODEL if USE_WEB_SEARCH else OPENAI_MODEL
+        
         while True:
             yield {"type": "thinking_start", "content": ""}
             
             response = self.client.chat.completions.create(
-                model=OPENAI_MODEL,
+                model=model,
                 messages=messages,
                 tools=TOOL_DEFINITIONS,
                 tool_choice="auto",

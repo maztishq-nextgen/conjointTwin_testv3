@@ -90,11 +90,38 @@ class WorkspaceStore:
                 );
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS vector_stores (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    openai_vector_store_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+                );
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS vector_store_files (
+                    id TEXT PRIMARY KEY,
+                    vector_store_id TEXT NOT NULL,
+                    openai_file_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(vector_store_id) REFERENCES vector_stores(id)
+                );
+                """
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces(owner_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_workspace ON artifacts(workspace_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_versions_artifact ON artifact_versions(artifact_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_workspace ON events(workspace_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_workspace ON messages(workspace_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_vector_stores_workspace ON vector_stores(workspace_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_vector_store_files ON vector_store_files(vector_store_id);")
             conn.commit()
 
     def _now(self) -> str:
@@ -387,3 +414,83 @@ class WorkspaceStore:
             )
             conn.commit()
             return cursor.rowcount
+
+    def create_vector_store(self, workspace_id: str, name: str, openai_vector_store_id: str) -> Dict[str, Any]:
+        vector_store_id = str(uuid4())
+        now = self._now()
+        with self.lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO vector_stores (id, workspace_id, name, openai_vector_store_id, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (vector_store_id, workspace_id, name, openai_vector_store_id, now),
+            )
+            conn.commit()
+        return {
+            "id": vector_store_id,
+            "workspace_id": workspace_id,
+            "name": name,
+            "openai_vector_store_id": openai_vector_store_id,
+            "created_at": now,
+        }
+
+    def get_vector_store(self, vector_store_id: str) -> Optional[Dict[str, Any]]:
+        with self.lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM vector_stores WHERE id = ?",
+                (vector_store_id,),
+            ).fetchone()
+        return self._row_to_dict(row)
+
+    def list_vector_stores(self, workspace_id: str) -> List[Dict[str, Any]]:
+        with self.lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM vector_stores WHERE workspace_id = ? ORDER BY created_at DESC",
+                (workspace_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_vector_store(self, vector_store_id: str) -> bool:
+        with self.lock, self._connect() as conn:
+            existing = conn.execute(
+                "SELECT * FROM vector_stores WHERE id = ?",
+                (vector_store_id,),
+            ).fetchone()
+            if not existing:
+                return False
+            conn.execute("DELETE FROM vector_store_files WHERE vector_store_id = ?", (vector_store_id,))
+            conn.execute("DELETE FROM vector_stores WHERE id = ?", (vector_store_id,))
+            conn.commit()
+        return True
+
+    def add_vector_store_file(
+        self, vector_store_id: str, openai_file_id: str, filename: str, status: str = "completed"
+    ) -> Dict[str, Any]:
+        file_id = str(uuid4())
+        now = self._now()
+        with self.lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO vector_store_files (id, vector_store_id, openai_file_id, filename, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (file_id, vector_store_id, openai_file_id, filename, status, now),
+            )
+            conn.commit()
+        return {
+            "id": file_id,
+            "vector_store_id": vector_store_id,
+            "openai_file_id": openai_file_id,
+            "filename": filename,
+            "status": status,
+            "created_at": now,
+        }
+
+    def list_vector_store_files(self, vector_store_id: str) -> List[Dict[str, Any]]:
+        with self.lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM vector_store_files WHERE vector_store_id = ? ORDER BY created_at DESC",
+                (vector_store_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
