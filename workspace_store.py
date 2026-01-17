@@ -122,6 +122,25 @@ class WorkspaceStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_workspace ON messages(workspace_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_vector_stores_workspace ON vector_stores(workspace_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_vector_store_files ON vector_store_files(vector_store_id);")
+            
+            # Users table for authentication
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    hashed_password TEXT NOT NULL,
+                    name TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    total_tokens INTEGER DEFAULT 0,
+                    total_cost REAL DEFAULT 0.0,
+                    request_count INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
             conn.commit()
 
     def _now(self) -> str:
@@ -494,3 +513,77 @@ class WorkspaceStore:
                 (vector_store_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    # User management methods
+    def create_user(self, email: str, hashed_password: str, name: Optional[str] = None) -> Dict[str, Any]:
+        user_id = str(uuid4())
+        now = self._now()
+        with self.lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (id, email, hashed_password, name, is_active, total_tokens, total_cost, request_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 1, 0, 0.0, 0, ?, ?)
+                """,
+                (user_id, email, hashed_password, name, now, now),
+            )
+            conn.commit()
+        return {
+            "id": user_id,
+            "email": email,
+            "name": name,
+            "is_active": True,
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "request_count": 0,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        with self.lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE email = ?",
+                (email,),
+            ).fetchone()
+        if row:
+            user = dict(row)
+            user["is_active"] = bool(user.get("is_active", 1))
+            return user
+        return None
+
+    def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        with self.lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+        if row:
+            user = dict(row)
+            user["is_active"] = bool(user.get("is_active", 1))
+            return user
+        return None
+
+    def update_user_api_usage(self, user_id: str, tokens: int, cost: float) -> Optional[Dict[str, Any]]:
+        now = self._now()
+        with self.lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE users
+                SET total_tokens = total_tokens + ?,
+                    total_cost = total_cost + ?,
+                    request_count = request_count + 1,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (tokens, cost, now, user_id),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+        if row:
+            user = dict(row)
+            user["is_active"] = bool(user.get("is_active", 1))
+            return user
+        return None

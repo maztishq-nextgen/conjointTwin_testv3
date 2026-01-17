@@ -176,14 +176,14 @@ TOOL_DEFINITIONS_RESPONSES = [
     {
         "type": "function",
         "name": "add_node",
-        "description": "Add a node to the graph.",
+        "description": "Add a node to the graph. Level is used for visual hierarchy and layout positioning.",
         "parameters": {
             "type": "object",
             "properties": {
                 "artifact_id": {"type": "string", "description": "ID of the graph"},
                 "id": {"type": "string", "description": "Unique descriptive node ID (e.g., 'central_ai', 'core_nlp', 'branch_transformers')"},
                 "label": {"type": "string", "description": "Display label (2-5 words)"},
-                "level": {"type": "integer", "description": "Hierarchy level: 0=central topic, 1=core concepts, 2=branches, 3=details, 4+=deeper"},
+                "level": {"type": "integer", "description": "Visual hierarchy level: 0=central topic, 1=core concepts, 2=branches, 3=details, 4+=deeper (used for layout only, does not restrict connections)"},
             },
             "required": ["artifact_id", "id", "label", "level"],
         },
@@ -191,17 +191,17 @@ TOOL_DEFINITIONS_RESPONSES = [
     {
         "type": "function",
         "name": "add_edge",
-        "description": "Add a single edge/relationship. Call this multiple times, once for each relationship.",
+        "description": "Add a single edge/relationship between any two nodes. Nodes at different levels can connect (e.g., level 4 to level 2). Use 'contains' for parent-child hierarchy, and 'related', 'influences', or 'causal_*' for cross-level or lateral connections.",
         "parameters": {
             "type": "object",
             "properties": {
                 "artifact_id": {"type": "string", "description": "ID of the graph"},
-                "source": {"type": "string", "description": "Source node ID"},
-                "target": {"type": "string", "description": "Target node ID"},
+                "source": {"type": "string", "description": "Source node ID (any level)"},
+                "target": {"type": "string", "description": "Target node ID (any level, can be different from source level)"},
                 "relationship_type": {
                     "type": "string",
                     "enum": ["causal_positive", "causal_negative", "related", "contains", "influences"],
-                    "description": "causal_positive (+), causal_negative (-), related, contains, influences",
+                    "description": "Relationship: 'contains' for hierarchy, 'related' for association (any levels), 'influences' for impact (any levels), 'causal_positive' for positive causation (any levels), 'causal_negative' for negative causation (any levels)",
                 },
             },
             "required": ["artifact_id", "source", "target", "relationship_type"],

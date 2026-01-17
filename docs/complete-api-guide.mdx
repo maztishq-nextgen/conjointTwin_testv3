@@ -1,0 +1,1890 @@
+---
+title: "Complete API Guide"
+description: "Comprehensive guide to the Artifacts Workspace API - workspaces, chat with AI, file search, URL fetching, and real-time streaming"
+---
+
+## Overview
+
+The Artifacts Workspace API enables you to create AI-powered workspaces with:
+- **JWT Authentication** - Secure user registration, login, and token management
+- **Intelligent Chat** - Stream AI responses with tool execution
+- **File Search** - Semantic search across uploaded documents
+- **URL Fetching** - AI can read and analyze webpages with pagination
+- **Graph Artifacts** - Create and manage mind maps and concept graphs
+- **Real-time Events** - SSE streaming for live updates
+
+## Base URL
+
+```
+http://localhost:8000
+```
+
+## Authentication
+
+The API uses JWT (JSON Web Tokens) for authentication:
+- **Access tokens** expire after 6 hours
+- **Refresh tokens** expire after 7 days
+- Protected endpoints require `Authorization: Bearer <access_token>` header
+
+<Note>
+All endpoints return JSON except SSE streams which return `text/event-stream`.
+</Note>
+
+---
+
+# Authentication
+
+Secure user registration, login, and token management using JWT.
+
+## Signup
+
+Register a new user account.
+
+<ParamField body="email" type="string" required>
+  User email address
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User password (minimum 8 characters)
+</ParamField>
+
+<ParamField body="name" type="string">
+  User display name
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X POST http://localhost:8000/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securepassword123",
+    "name": "John Doe"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/auth/signup",
+    json={
+        "email": "user@example.com",
+        "password": "securepassword123",
+        "name": "John Doe"
+    }
+)
+user = response.json()
+```
+
+```javascript JavaScript
+const response = await fetch("http://localhost:8000/auth/signup", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+        email: "user@example.com",
+        password: "securepassword123",
+        name: "John Doe"
+    })
+});
+const user = await response.json();
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "64dfc00c-c559-4a89-b9ca-4dc1a652af4d",
+  "email": "user@example.com",
+  "name": "John Doe",
+  "is_active": true,
+  "total_tokens": 0,
+  "total_cost": 0.0,
+  "request_count": 0,
+  "created_at": "2026-01-17T09:00:00Z",
+  "updated_at": "2026-01-17T09:00:00Z"
+}
+```
+
+```json Error
+{
+  "detail": "Email already registered"
+}
+```
+</ResponseExample>
+
+## Login
+
+Authenticate and receive access and refresh tokens.
+
+<ParamField body="email" type="string" required>
+  User email address
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User password
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securepassword123"
+  }'
+```
+
+```python Python
+response = requests.post(
+    "http://localhost:8000/auth/login",
+    json={
+        "email": "user@example.com",
+        "password": "securepassword123"
+    }
+)
+tokens = response.json()
+access_token = tokens["access_token"]
+```
+
+```javascript JavaScript
+const response = await fetch("http://localhost:8000/auth/login", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+        email: "user@example.com",
+        password: "securepassword123"
+    })
+});
+const {access_token, refresh_token} = await response.json();
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+```json Error
+{
+  "detail": "Invalid email or password"
+}
+```
+</ResponseExample>
+
+<Tip>
+Store the refresh token securely. Use it to obtain new access tokens without re-authenticating.
+</Tip>
+
+## Get current user
+
+Get the authenticated user's profile. **Requires authentication.**
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/auth/me \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```python Python
+response = requests.get(
+    "http://localhost:8000/auth/me",
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+user = response.json()
+```
+
+```javascript JavaScript
+const response = await fetch("http://localhost:8000/auth/me", {
+    headers: {"Authorization": `Bearer ${accessToken}`}
+});
+const user = await response.json();
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "64dfc00c-c559-4a89-b9ca-4dc1a652af4d",
+  "email": "user@example.com",
+  "name": "John Doe",
+  "is_active": true,
+  "total_tokens": 1500,
+  "total_cost": 0.0045,
+  "request_count": 3,
+  "created_at": "2026-01-17T09:00:00Z",
+  "updated_at": "2026-01-17T09:15:00Z"
+}
+```
+
+```json Error
+{
+  "detail": "Could not validate credentials"
+}
+```
+</ResponseExample>
+
+## Refresh token
+
+Exchange a refresh token for new access and refresh tokens.
+
+<ParamField body="refresh_token" type="string" required>
+  Valid refresh token
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X POST http://localhost:8000/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "YOUR_REFRESH_TOKEN"}'
+```
+
+```python Python
+response = requests.post(
+    "http://localhost:8000/auth/refresh",
+    json={"refresh_token": refresh_token}
+)
+new_tokens = response.json()
+```
+
+```javascript JavaScript
+const response = await fetch("http://localhost:8000/auth/refresh", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({refresh_token: refreshToken})
+});
+const newTokens = await response.json();
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+```json Error
+{
+  "detail": "Invalid or expired refresh token"
+}
+```
+</ResponseExample>
+
+<Warning>
+When you refresh tokens, store the new refresh token. The old refresh token may be invalidated.
+</Warning>
+
+## Environment variables
+
+Configure JWT settings via environment variables:
+
+```bash
+# Required for production - change this!
+JWT_SECRET_KEY=your-super-secret-key-here
+
+# Optional - defaults shown
+ACCESS_TOKEN_EXPIRE_HOURS=6
+REFRESH_TOKEN_EXPIRE_DAYS=7
+```
+
+---
+
+# Workspaces
+
+Workspaces are isolated containers for chat conversations, artifacts, and documents.
+
+## Create workspace
+
+<ParamField body="title" type="string" required>
+  Workspace title
+</ParamField>
+
+<ParamField body="project_id" type="string">
+  Optional project identifier
+</ParamField>
+
+<ParamField body="owner_id" type="string">
+  Optional owner identifier
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X POST http://localhost:8000/workspaces \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Research Hub"}'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/workspaces",
+    json={"title": "Research Hub"}
+)
+workspace = response.json()
+print(f"Created: {workspace['id']}")
+```
+
+```javascript JavaScript
+const response = await fetch("http://localhost:8000/workspaces", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({title: "Research Hub"})
+});
+const workspace = await response.json();
+console.log(`Created: ${workspace.id}`);
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "title": "Research Hub",
+  "project_id": null,
+  "owner_id": null,
+  "created_at": "2026-01-15T10:00:00Z",
+  "updated_at": "2026-01-15T10:00:00Z"
+}
+```
+</ResponseExample>
+
+## List workspaces
+
+<ParamField query="owner_id" type="string">
+  Filter by owner ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/workspaces
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "workspaces": [
+    {
+      "id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+      "title": "Research Hub",
+      "project_id": null,
+      "owner_id": null,
+      "created_at": "2026-01-15T10:00:00Z",
+      "updated_at": "2026-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Get workspace
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/workspaces/{workspace_id}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "title": "Research Hub",
+  "project_id": null,
+  "owner_id": null,
+  "created_at": "2026-01-15T10:00:00Z",
+  "updated_at": "2026-01-15T10:00:00Z"
+}
+```
+
+```json Error
+{
+  "detail": "Workspace not found"
+}
+```
+</ResponseExample>
+
+---
+
+# Chat
+
+Stream AI responses with support for file search, URL fetching, and tool execution.
+
+## Stream chat
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField body="message" type="string" required>
+  User message for the AI (1+ characters)
+</ParamField>
+
+<ParamField body="url" type="string">
+  Optional URL for AI to fetch and analyze
+</ParamField>
+
+<ParamField body="enable_file_search" type="boolean" default={true}>
+  Enable semantic search in workspace vector stores
+</ParamField>
+
+<ParamField body="max_file_search_results" type="integer">
+  Maximum number of file search results to retrieve
+</ParamField>
+
+<ParamField body="include_file_search_results" type="boolean" default={false}>
+  Include raw file search results in SSE stream
+</ParamField>
+
+<ParamField body="force_web_search" type="boolean" default={false}>
+  Force AI to use web search for current information
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -N -X POST http://localhost:8000/workspaces/{workspace_id}/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What are the key findings in the research paper?",
+    "enable_file_search": true
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/chat",
+    json={
+        "message": "What are the key findings?",
+        "enable_file_search": True
+    },
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line:
+        print(line.decode())
+```
+
+```javascript JavaScript
+const response = await fetch(
+    `http://localhost:8000/workspaces/${workspaceId}/chat`,
+    {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            message: "What are the key findings?",
+            enable_file_search: true
+        })
+    }
+);
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    console.log(decoder.decode(value));
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```text SSE Stream
+event: thinking_start
+data: {"type":"thinking_start","content":""}
+
+event: thinking_end
+data: {"type":"thinking_end","content":""}
+
+event: file_search_call
+data: {"type":"file_search_call","file_search_id":"fs_abc123","status":"completed","queries":["key findings"]}
+
+event: content
+data: {"type":"content","content":"The key findings include...","annotations":[{"type":"file_citation","index":45,"file_id":"file-xyz","filename":"research.pdf"}]}
+
+event: tool_call
+data: {"type":"tool_call","tool_name":"create_graph","tool_call_id":"call_123","arguments":{"title":"Research Findings","graph_type":"mind_map"}}
+
+event: tool_result
+data: {"type":"tool_result","tool_name":"create_graph","tool_call_id":"call_123","result":{"success":true,"artifact_id":"art_456"}}
+
+event: done
+data: {"type":"done","content":"Complete response text"}
+```
+</ResponseExample>
+
+### SSE Event Types
+
+The chat endpoint streams Server-Sent Events with the following types:
+
+<ResponseField name="thinking_start" type="object">
+  AI begins processing - show loading indicator
+</ResponseField>
+
+<ResponseField name="thinking_end" type="object">
+  AI finished thinking - hide loading indicator
+</ResponseField>
+
+<ResponseField name="url_fetching" type="object">
+  AI is fetching content from a URL
+  <Expandable title="properties">
+    <ResponseField name="url" type="string">URL being fetched</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="url_fetched" type="object">
+  URL successfully fetched
+  <Expandable title="properties">
+    <ResponseField name="url" type="string">Fetched URL</ResponseField>
+    <ResponseField name="title" type="string">Page title</ResponseField>
+    <ResponseField name="total_length" type="integer">Total content length in characters</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="file_search_call" type="object">
+  AI searched workspace files
+  <Expandable title="properties">
+    <ResponseField name="file_search_id" type="string">Search operation ID</ResponseField>
+    <ResponseField name="status" type="string">Status (completed/failed)</ResponseField>
+    <ResponseField name="queries" type="array">Search queries executed</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="content" type="object">
+  Text content from AI response
+  <Expandable title="properties">
+    <ResponseField name="content" type="string">Text chunk</ResponseField>
+    <ResponseField name="annotations" type="array">File citations (optional)</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="tool_call" type="object">
+  AI is calling a tool
+  <Expandable title="properties">
+    <ResponseField name="tool_name" type="string">Tool name (create_graph, add_node, fetch_url, etc.)</ResponseField>
+    <ResponseField name="tool_call_id" type="string">Call ID</ResponseField>
+    <ResponseField name="arguments" type="object">Tool arguments</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="tool_result" type="object">
+  Tool execution completed
+  <Expandable title="properties">
+    <ResponseField name="tool_name" type="string">Tool name</ResponseField>
+    <ResponseField name="tool_call_id" type="string">Call ID</ResponseField>
+    <ResponseField name="result" type="object">Tool result</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="done" type="object">
+  Response complete
+  <Expandable title="properties">
+    <ResponseField name="content" type="string">Full response text</ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Expand existing graphs
+
+Ask the AI to elaborate on specific nodes by adding more detail to the graph structure:
+
+<RequestExample>
+```bash cURL
+curl -N -X POST http://localhost:8000/workspaces/{workspace_id}/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Can you expand on agriculture? Add nodes for crop types, livestock systems, and soil management"
+  }'
+```
+
+```python Python
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/chat",
+    json={
+        "message": "Expand on the transportation node with different vehicle types"
+    },
+    stream=True
+)
+```
+
+```javascript JavaScript
+const response = await fetch(
+    `http://localhost:8000/workspaces/${workspaceId}/chat`,
+    {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            message: "Can you add more detail to the renewable energy section?"
+        })
+    }
+);
+```
+</RequestExample>
+
+<ResponseExample>
+```text SSE Stream
+event: tool_call
+data: {"type":"tool_call","tool_name":"list_graphs","tool_call_id":"call_1"}
+
+event: tool_call
+data: {"type":"tool_call","tool_name":"add_node","tool_call_id":"call_2","arguments":{"artifact_id":"abc123","id":"ag_crop_types","label":"Crop types","level":3}}
+
+event: tool_call
+data: {"type":"tool_call","tool_name":"add_node","tool_call_id":"call_3","arguments":{"artifact_id":"abc123","id":"ag_cereals","label":"Cereals and grains","level":4}}
+
+event: tool_call
+data: {"type":"tool_call","tool_name":"add_edge","tool_call_id":"call_4","arguments":{"artifact_id":"abc123","source":"agriculture","target":"ag_crop_types","relationship_type":"contains"}}
+
+event: content
+data: {"type":"content","content":"Expanded the Agriculture node by adding 3 main categories with 15 detailed sub-nodes..."}
+
+event: done
+data: {"type":"done"}
+```
+</ResponseExample>
+
+<Note>
+When you ask to expand a node, the AI will:
+1. Find the existing graph using `list_graphs()`
+2. Add new child nodes or related nodes to the specified topic
+3. Create appropriate edges (hierarchical or cross-level)
+4. Return both the updated graph structure and a summary
+
+This allows iterative graph refinement - start broad, then drill into specific areas.
+</Note>
+
+<Warning>
+The AI will **modify the graph structure**, not just provide text explanations. To get text-only explanations of nodes or edges without modifying the graph, use the [explain-node](#explain-node-streaming) or [explain-edge](#explain-edge-streaming) endpoints.
+</Warning>
+
+## Chat with URL
+
+Send a URL for the AI to fetch and analyze:
+
+<RequestExample>
+```bash cURL
+curl -N -X POST http://localhost:8000/workspaces/{workspace_id}/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Summarize this article",
+    "url": "https://example.com/article"
+  }'
+```
+
+```python Python
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/chat",
+    json={
+        "message": "Summarize this article",
+        "url": "https://example.com/article"
+    },
+    stream=True
+)
+```
+</RequestExample>
+
+<Tip>
+Large webpages are automatically split into 15k character chunks. The AI can fetch additional chunks using the `fetch_url` tool with pagination.
+</Tip>
+
+## List messages
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField query="limit" type="integer" default={50}>
+  Maximum messages to return
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/workspaces/{workspace_id}/messages?limit=20
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Create a mind map for battery manufacturing",
+      "tool_calls": null,
+      "tool_call_id": null,
+      "created_at": "2026-01-15T10:01:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": "I'll create a comprehensive mind map...",
+      "tool_calls": null,
+      "tool_call_id": null,
+      "created_at": "2026-01-15T10:01:05Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Clear messages
+
+Delete all chat messages in a workspace.
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X DELETE http://localhost:8000/workspaces/{workspace_id}/messages
+```
+</RequestExample>
+
+<ResponseExample>
+```text Success
+204 No Content
+```
+</ResponseExample>
+
+---
+
+# File Search
+
+Enable semantic search across workspace documents using OpenAI's vector stores.
+
+## Overview
+
+File search allows the AI to retrieve relevant information from uploaded documents:
+
+1. Create a vector store in your workspace
+2. Upload files (PDF, DOCX, TXT, code files, etc.)
+3. Enable file search in chat (enabled by default)
+4. AI automatically searches and cites documents
+
+<Note>
+File search is automatically enabled when a workspace has vector stores with files.
+</Note>
+
+## Supported file types
+
+| Format | MIME Type | Max Size |
+|--------|-----------|----------|
+| .txt | text/plain | 512MB |
+| .md | text/markdown | 512MB |
+| .pdf | application/pdf | 512MB |
+| .doc, .docx | application/msword | 512MB |
+| .html | text/html | 512MB |
+| .json | application/json | 512MB |
+| .py, .js, .ts | Code files | 512MB |
+| .java, .cpp, .c | Code files | 512MB |
+| .go, .rb, .php | Code files | 512MB |
+| .pptx | PowerPoint | 512MB |
+
+<Warning>
+Text files must be UTF-8, UTF-16, or ASCII encoded.
+</Warning>
+
+## Create vector store
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Vector store name (1-200 characters)
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X POST http://localhost:8000/workspaces/{workspace_id}/vector-stores \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Product Documentation"}'
+```
+
+```python Python
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/vector-stores",
+    json={"name": "Product Documentation"}
+)
+vector_store = response.json()
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "vs_abc123",
+  "workspace_id": "ws_xyz789",
+  "name": "Product Documentation",
+  "openai_vector_store_id": "vs_openai_def456",
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+```json Error
+{
+  "detail": "Workspace not found"
+}
+```
+</ResponseExample>
+
+## Upload file
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="vector_store_id" type="string" required>
+  Vector store ID
+</ParamField>
+
+<ParamField body="file" type="file" required>
+  File to upload (multipart/form-data)
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X POST http://localhost:8000/workspaces/{workspace_id}/vector-stores/{vector_store_id}/files \
+  -F "file=@documentation.pdf"
+```
+
+```python Python
+with open("documentation.pdf", "rb") as file:
+    response = requests.post(
+        f"http://localhost:8000/workspaces/{workspace_id}/vector-stores/{vector_store_id}/files",
+        files={"file": file}
+    )
+file_record = response.json()
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "vsf_abc123",
+  "vector_store_id": "vs_xyz789",
+  "openai_file_id": "file-def456",
+  "filename": "documentation.pdf",
+  "status": "completed",
+  "created_at": "2024-01-15T10:35:00Z"
+}
+```
+
+```json Error
+{
+  "detail": "Vector store not found"
+}
+```
+</ResponseExample>
+
+<Tip>
+OpenAI processes and indexes files automatically. Most files complete within seconds.
+</Tip>
+
+## List vector stores
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/workspaces/{workspace_id}/vector-stores
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "vector_stores": [
+    {
+      "id": "vs_abc123",
+      "workspace_id": "ws_xyz789",
+      "name": "Product Documentation",
+      "openai_vector_store_id": "vs_openai_def456",
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## List files
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="vector_store_id" type="string" required>
+  Vector store ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/workspaces/{workspace_id}/vector-stores/{vector_store_id}/files
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "files": [
+    {
+      "id": "vsf_abc123",
+      "vector_store_id": "vs_xyz789",
+      "openai_file_id": "file-def456",
+      "filename": "documentation.pdf",
+      "status": "completed",
+      "created_at": "2024-01-15T10:35:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Get vector store
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="vector_store_id" type="string" required>
+  Vector store ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/workspaces/{workspace_id}/vector-stores/{vector_store_id}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "vs_abc123",
+  "workspace_id": "ws_xyz789",
+  "name": "Product Documentation",
+  "openai_vector_store_id": "vs_openai_def456",
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+</ResponseExample>
+
+## Delete vector store
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="vector_store_id" type="string" required>
+  Vector store ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X DELETE http://localhost:8000/workspaces/{workspace_id}/vector-stores/{vector_store_id}
+```
+</RequestExample>
+
+<ResponseExample>
+```text Success
+204 No Content
+```
+
+```json Error
+{
+  "detail": "Vector store not found"
+}
+```
+</ResponseExample>
+
+---
+
+# Artifacts
+
+Artifacts store graph data (mind maps, concept maps, etc.) in JSON format.
+
+## Data model
+
+Artifacts use `application/vnd.graph+json` MIME type with this structure:
+
+<ResponseField name="graph_type" type="string">
+  Graph type: `mind_map`, `concept_map`, `causal_loop`, `systems_thinking`
+</ResponseField>
+
+<ResponseField name="nodes" type="array">
+  List of graph nodes
+</ResponseField>
+
+<Expandable title="nodes[]">
+  <ResponseField name="id" type="string">Descriptive node ID (e.g., 'central_ai', 'core_nlp')</ResponseField>
+  <ResponseField name="label" type="string">Display label (2-5 words)</ResponseField>
+  <ResponseField name="level" type="integer">Hierarchy: 0=central, 1=core, 2=branch, 3=detail, 4+=deeper (used for layout)</ResponseField>
+</Expandable>
+
+<ResponseField name="edges" type="array">
+  List of relationships between nodes. **Edges can connect nodes at any level** - not just parent-child hierarchies.
+</ResponseField>
+
+<Expandable title="edges[]">
+  <ResponseField name="id" type="string">Edge ID</ResponseField>
+  <ResponseField name="source" type="string">Source node ID</ResponseField>
+  <ResponseField name="target" type="string">Target node ID (can be at any level)</ResponseField>
+  <ResponseField name="relationship_type" type="string">Type: `contains`, `related`, `causal_positive`, `causal_negative`, `influences`</ResponseField>
+</Expandable>
+
+<Tip>
+Node levels (0-4) are primarily for visual hierarchy and layout. Edges can freely connect nodes across different levels - for example, a level 4 detail node can connect to a level 2 branch node using `related` or `influences` relationship types.
+</Tip>
+
+<ResponseExample>
+```json Basic Hierarchy
+{
+  "graph_type": "mind_map",
+  "nodes": [
+    {"id": "central_ai", "label": "Artificial Intelligence", "level": 0},
+    {"id": "core_ml", "label": "Machine Learning", "level": 1},
+    {"id": "core_nlp", "label": "Natural Language", "level": 1},
+    {"id": "branch_transformers", "label": "Transformers", "level": 2}
+  ],
+  "edges": [
+    {"id": "e1", "source": "central_ai", "target": "core_ml", "relationship_type": "contains"},
+    {"id": "e2", "source": "central_ai", "target": "core_nlp", "relationship_type": "contains"},
+    {"id": "e3", "source": "core_nlp", "target": "branch_transformers", "relationship_type": "contains"}
+  ],
+  "metadata": {
+    "created_by": "assistant"
+  }
+}
+```
+
+```json Cross-Level Connections
+{
+  "graph_type": "concept_map",
+  "nodes": [
+    {"id": "central_climate", "label": "Climate Change", "level": 0},
+    {"id": "core_causes", "label": "Causes", "level": 1},
+    {"id": "core_effects", "label": "Effects", "level": 1},
+    {"id": "branch_co2", "label": "CO2 Emissions", "level": 2},
+    {"id": "detail_transport", "label": "Transportation", "level": 3},
+    {"id": "detail_sea_level", "label": "Sea Level Rise", "level": 3}
+  ],
+  "edges": [
+    {"id": "e1", "source": "central_climate", "target": "core_causes", "relationship_type": "contains"},
+    {"id": "e2", "source": "central_climate", "target": "core_effects", "relationship_type": "contains"},
+    {"id": "e3", "source": "core_causes", "target": "branch_co2", "relationship_type": "contains"},
+    {"id": "e4", "source": "branch_co2", "target": "detail_transport", "relationship_type": "contains"},
+    {"id": "e5", "source": "core_effects", "target": "detail_sea_level", "relationship_type": "contains"},
+    {"id": "e6", "source": "detail_transport", "target": "branch_co2", "relationship_type": "causal_positive"},
+    {"id": "e7", "source": "branch_co2", "target": "detail_sea_level", "relationship_type": "causal_positive"}
+  ],
+  "metadata": {
+    "created_by": "assistant"
+  }
+}
+```
+</ResponseExample>
+
+<Note>
+In the cross-level example above, notice:
+- Edge `e6`: Level 3 node (`detail_transport`) connects back to level 2 node (`branch_co2`)
+- Edge `e7`: Level 2 node (`branch_co2`) connects to level 3 node (`detail_sea_level`) under a different branch
+- These cross-level edges use `causal_positive` to show cause-and-effect relationships
+</Note>
+
+## Create artifact
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  MIME type (e.g., `application/vnd.graph+json`)
+</ParamField>
+
+<ParamField body="title" type="string">
+  Artifact title
+</ParamField>
+
+<ParamField body="content" type="string" required>
+  Artifact content as JSON string
+</ParamField>
+
+<ParamField body="created_by" type="string">
+  Creator identifier
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X POST http://localhost:8000/workspaces/{workspace_id}/artifacts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "application/vnd.graph+json",
+    "title": "AI Mind Map",
+    "content": "{\"graph_type\":\"mind_map\",\"nodes\":[],\"edges\":[]}"
+  }'
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+  "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "type": "application/vnd.graph+json",
+  "title": "AI Mind Map",
+  "content": "{\"graph_type\":\"mind_map\",\"nodes\":[],\"edges\":[]}",
+  "version_id": "b2e2bd4a-02a3-4c0f-8a2f-9dfb1c1a7e0a",
+  "created_at": "2026-01-15T10:02:00Z",
+  "updated_at": "2026-01-15T10:02:00Z"
+}
+```
+</ResponseExample>
+
+## List artifacts
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/workspaces/{workspace_id}/artifacts
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "artifacts": [
+    {
+      "id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+      "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+      "type": "application/vnd.graph+json",
+      "title": "AI Mind Map",
+      "latest_version_id": "b2e2bd4a-02a3-4c0f-8a2f-9dfb1c1a7e0a",
+      "created_at": "2026-01-15T10:02:00Z",
+      "updated_at": "2026-01-15T10:02:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Get artifact
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="artifact_id" type="string" required>
+  Artifact ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+  "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "type": "application/vnd.graph+json",
+  "title": "AI Mind Map",
+  "content": "{\"graph_type\":\"mind_map\",\"nodes\":[],\"edges\":[]}",
+  "version_id": "b2e2bd4a-02a3-4c0f-8a2f-9dfb1c1a7e0a",
+  "created_at": "2026-01-15T10:02:00Z",
+  "updated_at": "2026-01-15T10:02:00Z"
+}
+```
+
+```json Error
+{
+  "detail": "Artifact not found"
+}
+```
+</ResponseExample>
+
+## Update artifact
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="artifact_id" type="string" required>
+  Artifact ID
+</ParamField>
+
+<ParamField body="content" type="string" required>
+  New content (JSON string)
+</ParamField>
+
+<ParamField body="created_by" type="string">
+  Creator identifier
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X PUT http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id} \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "{\"graph_type\":\"mind_map\",\"nodes\":[{\"id\":\"n1\",\"label\":\"Updated\",\"level\":0}],\"edges\":[]}"
+  }'
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+  "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "type": "application/vnd.graph+json",
+  "title": "AI Mind Map",
+  "content": "{\"graph_type\":\"mind_map\",\"nodes\":[{\"id\":\"n1\",\"label\":\"Updated\",\"level\":0}],\"edges\":[]}",
+  "version_id": "c3f3ce5b-13b4-5d1g-9a3g-0egc2d2b8f1b",
+  "created_at": "2026-01-15T10:02:00Z",
+  "updated_at": "2026-01-15T10:04:00Z"
+}
+```
+</ResponseExample>
+
+## Delete artifact
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="artifact_id" type="string" required>
+  Artifact ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X DELETE http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}
+```
+</RequestExample>
+
+<ResponseExample>
+```text Success
+204 No Content
+```
+</ResponseExample>
+
+## Explain node (streaming)
+
+Get AI-generated explanation of a specific node in a graph. Streams SSE events with the explanation.
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="artifact_id" type="string" required>
+  Graph artifact ID
+</ParamField>
+
+<ParamField body="node_id" type="string" required>
+  Node ID to explain
+</ParamField>
+
+<ParamField body="artifact_id" type="string" required>
+  Graph artifact ID (same as path parameter)
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -N -X POST http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-node \
+  -H "Content-Type: application/json" \
+  -d '{
+    "artifact_id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+    "node_id": "branch_transformers"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-node",
+    json={
+        "artifact_id": artifact_id,
+        "node_id": "branch_transformers"
+    },
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line:
+        print(line.decode())
+```
+
+```javascript JavaScript
+const response = await fetch(
+    `http://localhost:8000/workspaces/${workspaceId}/artifacts/${artifactId}/explain-node`,
+    {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            artifact_id: artifactId,
+            node_id: "branch_transformers"
+        })
+    }
+);
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    console.log(decoder.decode(value));
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```text SSE Stream
+event: thinking_start
+data: {"type":"thinking_start","content":""}
+
+event: thinking_end
+data: {"type":"thinking_end","content":""}
+
+event: content
+data: {"type":"content","content":"This node represents Transformers, a revolutionary..."}
+
+event: content
+data: {"type":"content","content":" architecture in machine learning..."}
+
+event: done
+data: {"type":"done","content":"This node represents Transformers, a revolutionary architecture in machine learning that uses self-attention mechanisms. It serves as a key bridge between Deep Learning and GPT models, showing how foundational ML concepts evolve into practical applications."}
+```
+</ResponseExample>
+
+<Tip>
+The AI analyzes the node's position in the graph, its connections, and its level to provide contextual explanation about what it represents and its role in the overall structure.
+</Tip>
+
+## Explain edge (streaming)
+
+Get AI-generated explanation of a specific relationship/edge between two nodes. Streams SSE events with the explanation.
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="artifact_id" type="string" required>
+  Graph artifact ID
+</ParamField>
+
+<ParamField body="source_id" type="string" required>
+  Source node ID
+</ParamField>
+
+<ParamField body="target_id" type="string" required>
+  Target node ID
+</ParamField>
+
+<ParamField body="artifact_id" type="string" required>
+  Graph artifact ID (same as path parameter)
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -N -X POST http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-edge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "artifact_id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+    "source_id": "branch_deep_learning",
+    "target_id": "branch_transformers"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-edge",
+    json={
+        "artifact_id": artifact_id,
+        "source_id": "branch_deep_learning",
+        "target_id": "branch_transformers"
+    },
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line:
+        print(line.decode())
+```
+
+```javascript JavaScript
+const response = await fetch(
+    `http://localhost:8000/workspaces/${workspaceId}/artifacts/${artifactId}/explain-edge`,
+    {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            artifact_id: artifactId,
+            source_id: "branch_deep_learning",
+            target_id: "branch_transformers"
+        })
+    }
+);
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    console.log(decoder.decode(value));
+}
+```
+</RequestExample>
+
+<ResponseExample>
+```text SSE Stream
+event: thinking_start
+data: {"type":"thinking_start","content":""}
+
+event: thinking_end
+data: {"type":"thinking_end","content":""}
+
+event: content
+data: {"type":"content","content":"This relationship shows how Deep Learning influences..."}
+
+event: content
+data: {"type":"content","content":" the development of Transformers by providing foundational..."}
+
+event: done
+data: {"type":"done","content":"This relationship shows how Deep Learning influences the development of Transformers by providing foundational neural network concepts and training techniques. The connection is crucial as it demonstrates the technological lineage in AI, where advancements in one area enable breakthroughs in another."}
+```
+</ResponseExample>
+
+<Note>
+These explanation endpoints are perfect for interactive graph UIs where users can click on nodes or edges to learn more about them. The AI considers the relationship type, node levels, and overall graph structure to provide meaningful context.
+</Note>
+
+---
+
+# Events
+
+Events track all workspace activity in real-time.
+
+## List events
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField query="since_id" type="integer">
+  Only return events after this ID
+</ParamField>
+
+<ParamField query="limit" type="integer" default={100}>
+  Maximum events to return
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl http://localhost:8000/workspaces/{workspace_id}/events?limit=50
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "events": [
+    {
+      "id": 1,
+      "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+      "type": "workspace_created",
+      "artifact_id": null,
+      "payload": {"title":"Research Hub"},
+      "created_at": "2026-01-15T10:00:00Z"
+    },
+    {
+      "id": 2,
+      "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+      "type": "graph_created",
+      "artifact_id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+      "payload": {"title":"AI Mind Map","graph_type":"mind_map"},
+      "created_at": "2026-01-15T10:02:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Create event
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  Event type name
+</ParamField>
+
+<ParamField body="payload" type="object">
+  Event payload data
+</ParamField>
+
+<ParamField body="artifact_id" type="string">
+  Associated artifact ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -X POST http://localhost:8000/workspaces/{workspace_id}/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "custom_event",
+    "payload": {"status":"ok"}
+  }'
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "id": 12,
+  "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "type": "custom_event",
+  "artifact_id": null,
+  "payload": {"status":"ok"},
+  "created_at": "2026-01-15T10:05:00Z"
+}
+```
+</ResponseExample>
+
+## Stream events
+
+Stream real-time workspace events via SSE.
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField query="since_id" type="integer">
+  Start streaming after this event ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -N http://localhost:8000/workspaces/{workspace_id}/events/stream
+```
+
+```python Python
+response = requests.get(
+    f"http://localhost:8000/workspaces/{workspace_id}/events/stream",
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line:
+        print(line.decode())
+```
+</RequestExample>
+
+<ResponseExample>
+```text SSE Stream
+id: 12
+event: custom_event
+data: {"id":12,"workspace_id":"7b138f6c-2220-4e3e-9c90-2dfe4c9444c9","type":"custom_event","artifact_id":null,"payload":{"status":"ok"},"created_at":"2026-01-15T10:05:00Z"}
+
+id: 13
+event: graph_created
+data: {"id":13,"workspace_id":"7b138f6c-2220-4e3e-9c90-2dfe4c9444c9","type":"graph_created","artifact_id":"art_789","payload":{"title":"New Graph"},"created_at":"2026-01-15T10:06:00Z"}
+```
+</ResponseExample>
+
+---
+
+# AI Tools
+
+The AI has access to several built-in tools that execute automatically during chat.
+
+## Available tools
+
+### fetch_url
+
+Fetches and extracts text content from webpages with automatic pagination for large pages.
+
+**Parameters:**
+- `url` (string, required) - Full URL including http:// or https://
+- `chunk_index` (integer, default: 0) - Which chunk to retrieve (0-based)
+- `chunk_size` (integer, default: 15000) - Characters per chunk
+
+**Returns:**
+- `content` - Extracted text content
+- `title` - Page title
+- `total_chunks` - Total chunks available
+- `has_more` - Boolean indicating more chunks exist
+
+**Example usage by AI:**
+```json
+// First call
+{"url": "https://example.com/long-article", "chunk_index": 0}
+
+// If has_more=true, fetch next chunk
+{"url": "https://example.com/long-article", "chunk_index": 1}
+```
+
+### create_graph
+
+Creates a new empty graph artifact.
+
+**Parameters:**
+- `title` (string) - Graph title
+- `graph_type` (string) - One of: `mind_map`, `concept_map`, `causal_loop`, `systems_thinking`
+
+**Returns:**
+- `artifact_id` - ID of created artifact
+
+### add_node
+
+Adds a node to an existing graph.
+
+**Parameters:**
+- `artifact_id` (string) - Graph artifact ID
+- `id` (string) - Descriptive node ID (e.g., 'central_ai', 'core_nlp')
+- `label` (string) - Display label (2-5 words)
+- `level` (integer) - Hierarchy: 0=central, 1=core, 2=branch, 3=detail
+
+### add_edge
+
+Connects two nodes with a relationship.
+
+**Parameters:**
+- `artifact_id` (string) - Graph artifact ID
+- `source` (string) - Source node ID
+- `target` (string) - Target node ID
+- `relationship_type` (string) - Type: `contains`, `related`, `causal_positive`, `causal_negative`, `influences`
+
+### finish_graph
+
+Finalizes graph layout after adding all nodes and edges.
+
+**Parameters:**
+- `artifact_id` (string) - Graph artifact ID
+
+### list_graphs
+
+Lists all graph artifacts in the workspace.
+
+---
+
+# Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Organize documents" icon="folder">
+    Create separate vector stores for different topics (e.g., "Product Docs", "API Reference", "User Guides")
+  </Card>
+  
+  <Card title="Use pagination" icon="file-lines">
+    When sending URLs, the AI automatically handles large pages by fetching chunks. Monitor `has_more` in responses.
+  </Card>
+  
+  <Card title="Enable file search" icon="magnifying-glass">
+    Keep file search enabled (default) so AI can automatically reference uploaded documents with citations.
+  </Card>
+  
+  <Card title="Stream responses" icon="water">
+    Use SSE streaming for real-time updates. Show loading indicators during `thinking_start`/`thinking_end`.
+  </Card>
+  
+  <Card title="Handle tool calls" icon="wrench">
+    Monitor `tool_call` and `tool_result` events to show users what the AI is doing (fetching URLs, creating graphs).
+  </Card>
+  
+  <Card title="Clear history" icon="trash">
+    Delete messages when starting new topics to avoid context confusion and reduce token costs.
+  </Card>
+</CardGroup>
+
+---
+
+# Pricing
+
+## OpenAI Costs
+
+- **Chat completions**: Standard GPT-4 pricing
+- **Vector storage**: $0.10 per GB per day
+- **File processing**: Included in storage costs
+
+## Optimization tips
+
+<Tip>
+Reuse vector stores across sessions to minimize storage costs. Upload files once and reference them in multiple chats.
+</Tip>
+
+---
+
+# Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="File search not working">
+    **Symptoms:** No `file_search_call` events in chat responses
+    
+    **Solutions:**
+    - Verify workspace has vector stores with uploaded files
+    - Confirm `enable_file_search: true` in request (default)
+    - Check file upload status is "completed"
+    - Ensure question relates to document content
+    - Try more specific search terms
+  </Accordion>
+
+  <Accordion title="URL fetching fails">
+    **Symptoms:** `url_fetch_error` event or timeout
+    
+    **Solutions:**
+    - Verify URL is accessible (not behind authentication)
+    - Check URL returns HTML content (not JSON/XML APIs)
+    - Some sites block bots - try alternative sources
+    - Ensure URL includes http:// or https://
+  </Accordion>
+
+  <Accordion title="File upload errors">
+    **Symptoms:** 400/500 errors on file upload
+    
+    **Solutions:**
+    - Check file size is under 512MB
+    - Verify file format is supported (see supported types)
+    - Ensure text files are UTF-8, UTF-16, or ASCII
+    - Try converting file to PDF if other formats fail
+  </Accordion>
+
+  <Accordion title="SSE stream disconnects">
+    **Symptoms:** Stream stops mid-response
+    
+    **Solutions:**
+    - Use `-N` flag with cURL (`curl -N`)
+    - Disable buffering in HTTP clients
+    - Check network stability
+    - Implement reconnection logic with `since_id`
+  </Accordion>
+
+  <Accordion title="Annotations not appearing">
+    **Symptoms:** No citations in AI responses
+    
+    **Solutions:**
+    - Verify files are indexed (status="completed")
+    - Check `file_search_call` events are occurring
+    - Parse the `annotations` array in `content` events
+    - Ensure questions require document references
+  </Accordion>
+
+  <Accordion title="Large webpages truncated">
+    **Symptoms:** AI says "content truncated" or incomplete info
+    
+    **Solutions:**
+    - AI should automatically fetch additional chunks
+    - Check for `url_chunk_retrieved` events
+    - Verify `has_more` field in fetch_url results
+    - If AI doesn't paginate, prompt: "Can you fetch the remaining chunks?"
+  </Accordion>
+</AccordionGroup>
+
+---
+
+# Complete workflow example
+
+Here's a full workflow demonstrating file search and chat:
+
+<Steps>
+
+### Create workspace
+
+```bash
+WORKSPACE_ID=$(curl -sS -X POST http://localhost:8000/workspaces \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Research Project"}' | jq -r '.id')
+```
+
+### Create vector store
+
+```bash
+VECTOR_STORE_ID=$(curl -sS -X POST \
+  http://localhost:8000/workspaces/$WORKSPACE_ID/vector-stores \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Research Papers"}' | jq -r '.id')
+```
+
+### Upload document
+
+```bash
+curl -X POST \
+  http://localhost:8000/workspaces/$WORKSPACE_ID/vector-stores/$VECTOR_STORE_ID/files \
+  -F "file=@research-paper.pdf"
+```
+
+<Check>
+Wait a few seconds for file indexing to complete.
+</Check>
+
+### Chat with file search
+
+```bash
+curl -N -X POST \
+  http://localhost:8000/workspaces/$WORKSPACE_ID/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What are the key findings in the research paper?",
+    "enable_file_search": true
+  }'
+```
+
+### Chat with URL
+
+```bash
+curl -N -X POST \
+  http://localhost:8000/workspaces/$WORKSPACE_ID/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Compare the findings with this article",
+    "url": "https://example.com/related-article"
+  }'
+```
+
+</Steps>
+
+---
+
+# Error codes
+
+| Code | Description | Solution |
+|------|-------------|----------|
+| 400 | Bad request - invalid parameters | Check request format and required fields |
+| 404 | Resource not found | Verify workspace/artifact/vector store ID |
+| 422 | Validation error | Review parameter types and constraints |
+| 500 | Server error | Check logs, retry request |
+| 503 | OpenAI API unavailable | Wait and retry, check OpenAI status |
+
+---
+
+# Rate limits
+
+No built-in rate limits. Implement rate limiting in your API gateway for production.
+
+**Recommended limits:**
+- 100 requests/minute per user
+- 10 concurrent SSE connections per user
+- 50 file uploads/hour per workspace

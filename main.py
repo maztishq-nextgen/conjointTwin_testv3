@@ -3,12 +3,21 @@ import json
 from typing import Any, Dict, List, Optional
 
 import openai
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_responses import ChatAgentResponses, format_chat_sse
+from auth import (
+    init_auth,
+    hash_password,
+    verify_password,
+    create_tokens,
+    validate_refresh_token,
+    get_current_user,
+    get_current_user_optional,
+)
 from config import OPENAI_API_KEY
 from schemas import (
     ArtifactCreateRequest,
@@ -20,7 +29,14 @@ from schemas import (
     EventCreateRequest,
     EventListResponse,
     EventResponse,
+    ExplainNodeRequest,
+    ExplainEdgeRequest,
     MessageListResponse,
+    TokenRefreshRequest,
+    TokenResponse,
+    UserCreate,
+    UserLogin,
+    UserResponse,
     VectorStoreCreate,
     VectorStoreResponse,
     VectorStoreListResponse,
@@ -48,6 +64,9 @@ app.add_middleware(
 
 store = WorkspaceStore()
 openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+# Initialize auth module with store
+init_auth(store)
 
 
 def require_workspace(workspace_id: str) -> Dict[str, Any]:
@@ -360,6 +379,116 @@ async def delete_vector_store(workspace_id: str, vector_store_id: str):
     )
     
     return
+
+
+@app.post("/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-node")
+async def explain_node(workspace_id: str, artifact_id: str, request: ExplainNodeRequest, req: Request):
+    require_workspace(workspace_id)
+    
+    # Verify artifact exists and belongs to workspace
+    artifact = store.get_artifact(artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if artifact["workspace_id"] != workspace_id:
+        raise HTTPException(status_code=403, detail="Artifact does not belong to workspace")
+    
+    agent = ChatAgentResponses(store, workspace_id)
+
+    async def stream_generator():
+        async for event in agent.explain_node_stream(
+            artifact_id=request.artifact_id,
+            node_id=request.node_id,
+        ):
+            yield format_chat_sse(event)
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+
+@app.post("/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-edge")
+async def explain_edge(workspace_id: str, artifact_id: str, request: ExplainEdgeRequest, req: Request):
+    require_workspace(workspace_id)
+    
+    # Verify artifact exists and belongs to workspace
+    artifact = store.get_artifact(artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if artifact["workspace_id"] != workspace_id:
+        raise HTTPException(status_code=403, detail="Artifact does not belong to workspace")
+    
+    agent = ChatAgentResponses(store, workspace_id)
+
+    async def stream_generator():
+        async for event in agent.explain_edge_stream(
+            artifact_id=request.artifact_id,
+            source_id=request.source_id,
+            target_id=request.target_id,
+        ):
+            yield format_chat_sse(event)
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+
+# Authentication endpoints
+@app.get("/auth/status")
+async def auth_status():
+    """Check if auth bypass is enabled."""
+    from config import AUTH_BYPASS, DUMMY_USER_EMAIL
+    return {"bypass": AUTH_BYPASS, "dummy_email": DUMMY_USER_EMAIL if AUTH_BYPASS else None}
+
+
+@app.post("/auth/signup", response_model=UserResponse)
+async def signup(request: UserCreate):
+    """Register a new user."""
+    # Check if user already exists
+    existing = store.get_user_by_email(request.email)
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Hash password and create user
+    hashed_password = hash_password(request.password)
+    user = store.create_user(
+        email=request.email,
+        hashed_password=hashed_password,
+        name=request.name,
+    )
+    
+    return user
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+async def login(request: UserLogin):
+    """Authenticate user and return tokens."""
+    user = store.get_user_by_email(request.email)
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    if not verify_password(request.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    if not user.get("is_active", False):
+        raise HTTPException(status_code=403, detail="User account is inactive")
+    
+    tokens = create_tokens(user["id"])
+    return tokens
+
+
+@app.post("/auth/refresh", response_model=TokenResponse)
+async def refresh_token(request: TokenRefreshRequest):
+    """Exchange refresh token for new tokens."""
+    user_id = validate_refresh_token(request.refresh_token)
+    
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    
+    tokens = create_tokens(user_id)
+    return tokens
+
+
+@app.get("/auth/me", response_model=UserResponse)
+async def get_me(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Get current authenticated user."""
+    return current_user
 
 
 @app.get("/")

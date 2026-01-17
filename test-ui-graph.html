@@ -186,6 +186,88 @@
     .thinking-indicator.active { display: block; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     .pulse { animation: pulse 1.5s infinite; }
+    
+    /* Auth Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 24px;
+      width: 100%;
+      max-width: 400px;
+    }
+    .modal h2 { margin-bottom: 20px; font-size: 18px; }
+    .modal-tabs {
+      display: flex;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #333;
+    }
+    .modal-tab {
+      flex: 1;
+      padding: 10px;
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .modal-tab.active { color: #fff; border-bottom: 2px solid #2563eb; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; margin-bottom: 6px; font-size: 12px; color: #888; }
+    .form-group input {
+      width: 100%;
+      background: #222;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .form-group input:focus { outline: none; border-color: #2563eb; }
+    .btn-auth {
+      width: 100%;
+      background: #2563eb;
+      border: none;
+      color: #fff;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .btn-auth:hover { background: #1d4ed8; }
+    .error-msg { color: #ef4444; font-size: 12px; margin-top: 8px; }
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      font-size: 12px;
+    }
+    .user-email { color: #a0a0a0; }
+    .btn-logout {
+      background: #333;
+      border: 1px solid #555;
+      color: #e0e0e0;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .btn-logout:hover { background: #444; }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -193,8 +275,52 @@
     <h1>🧠 Graph Workspace</h1>
     <select id="workspaceSelect"><option value="">Select workspace...</option></select>
     <button onclick="createWorkspace()" class="btn-primary">+ New</button>
-    <span id="status" style="margin-left:auto;font-size:11px;color:#666;">Ready</span>
+    <div class="user-info" id="userInfo">
+      <span class="user-email" id="userEmail"></span>
+      <button class="btn-logout" onclick="logout()">Logout</button>
+    </div>
+    <span id="status" style="font-size:11px;color:#666;">Ready</span>
   </header>
+  
+  <!-- Auth Modal -->
+  <div class="modal-overlay" id="authModal">
+    <div class="modal">
+      <div class="modal-tabs">
+        <button class="modal-tab active" onclick="showTab('login')" id="loginTab">Login</button>
+        <button class="modal-tab" onclick="showTab('signup')" id="signupTab">Sign Up</button>
+      </div>
+      
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="loginEmail" required placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="loginPassword" required placeholder="••••••••">
+        </div>
+        <div class="error-msg" id="loginError"></div>
+        <button type="submit" class="btn-auth">Login</button>
+      </form>
+      
+      <form id="signupForm" class="hidden" onsubmit="handleSignup(event)">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="signupName" placeholder="John Doe">
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="signupEmail" required placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="signupPassword" required minlength="8" placeholder="Min 8 characters">
+        </div>
+        <div class="error-msg" id="signupError"></div>
+        <button type="submit" class="btn-auth">Create Account</button>
+      </form>
+    </div>
+  </div>
   
   <main>
     <div class="chat-panel">
@@ -231,13 +357,206 @@
   </main>
 
   <script>
-    const API = 'http://localhost:8001';
+    const API = 'http://localhost:8000';
     let workspace = null;
     let currentGraph = { nodes: [], edges: [] };
     let nodePositions = {};
+    let accessToken = localStorage.getItem('accessToken');
+    let refreshToken = localStorage.getItem('refreshToken');
+    let currentUser = null;
+
+    // Auth functions
+    function showTab(tab) {
+      document.getElementById('loginForm').classList.toggle('hidden', tab !== 'login');
+      document.getElementById('signupForm').classList.toggle('hidden', tab !== 'signup');
+      document.getElementById('loginTab').classList.toggle('active', tab === 'login');
+      document.getElementById('signupTab').classList.toggle('active', tab === 'signup');
+      document.getElementById('loginError').textContent = '';
+      document.getElementById('signupError').textContent = '';
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail').value;
+      const password = document.getElementById('loginPassword').value;
+      
+      try {
+        const res = await fetch(`${API}/auth/login`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email, password})
+        });
+        
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Login failed');
+        }
+        
+        const tokens = await res.json();
+        saveTokens(tokens);
+        await loadCurrentUser();
+        hideAuthModal();
+        loadWorkspaces();
+      } catch (err) {
+        document.getElementById('loginError').textContent = err.message;
+      }
+    }
+
+    async function handleSignup(e) {
+      e.preventDefault();
+      const name = document.getElementById('signupName').value;
+      const email = document.getElementById('signupEmail').value;
+      const password = document.getElementById('signupPassword').value;
+      
+      try {
+        const res = await fetch(`${API}/auth/signup`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email, password, name})
+        });
+        
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Signup failed');
+        }
+        
+        // Auto-login after signup
+        await handleLogin({preventDefault: () => {
+          document.getElementById('loginEmail').value = email;
+          document.getElementById('loginPassword').value = password;
+        }});
+        
+        // Actually login
+        const loginRes = await fetch(`${API}/auth/login`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email, password})
+        });
+        
+        if (loginRes.ok) {
+          const tokens = await loginRes.json();
+          saveTokens(tokens);
+          await loadCurrentUser();
+          hideAuthModal();
+          loadWorkspaces();
+        }
+      } catch (err) {
+        document.getElementById('signupError').textContent = err.message;
+      }
+    }
+
+    function saveTokens(tokens) {
+      accessToken = tokens.access_token;
+      refreshToken = tokens.refresh_token;
+      localStorage.setItem('accessToken', accessToken);
+      localStorage.setItem('refreshToken', refreshToken);
+    }
+
+    async function loadCurrentUser() {
+      if (!accessToken) return;
+      
+      try {
+        const res = await fetch(`${API}/auth/me`, {
+          headers: {'Authorization': `Bearer ${accessToken}`}
+        });
+        
+        if (res.ok) {
+          currentUser = await res.json();
+          document.getElementById('userEmail').textContent = currentUser.email;
+          document.getElementById('userInfo').classList.remove('hidden');
+        } else if (res.status === 401) {
+          // Try refresh
+          await refreshAccessToken();
+        }
+      } catch (err) {
+        console.error('Failed to load user:', err);
+      }
+    }
+
+    async function refreshAccessToken() {
+      if (!refreshToken) {
+        logout();
+        return;
+      }
+      
+      try {
+        const res = await fetch(`${API}/auth/refresh`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({refresh_token: refreshToken})
+        });
+        
+        if (res.ok) {
+          const tokens = await res.json();
+          saveTokens(tokens);
+          await loadCurrentUser();
+        } else {
+          logout();
+        }
+      } catch (err) {
+        logout();
+      }
+    }
+
+    function logout() {
+      accessToken = null;
+      refreshToken = null;
+      currentUser = null;
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      document.getElementById('userInfo').classList.add('hidden');
+      showAuthModal();
+    }
+
+    function showAuthModal() {
+      document.getElementById('authModal').style.display = 'flex';
+    }
+
+    function hideAuthModal() {
+      document.getElementById('authModal').style.display = 'none';
+    }
+
+    function getAuthHeaders() {
+      return accessToken ? {'Authorization': `Bearer ${accessToken}`} : {};
+    }
+
+    // Check auth on load
+    async function checkAuth() {
+      // Check if bypass mode is enabled
+      try {
+        const statusRes = await fetch(`${API}/auth/status`);
+        const status = await statusRes.json();
+        
+        if (status.bypass) {
+          // Bypass mode - skip auth modal entirely
+          console.log('[AUTH BYPASS] Using dummy account:', status.dummy_email);
+          currentUser = { email: status.dummy_email, name: 'Dev User' };
+          document.getElementById('userEmail').textContent = status.dummy_email + ' (bypass)';
+          document.getElementById('userInfo').classList.remove('hidden');
+          hideAuthModal();
+          loadWorkspaces();
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to check auth status:', err);
+      }
+      
+      // Normal auth flow
+      if (accessToken) {
+        await loadCurrentUser();
+        if (currentUser) {
+          hideAuthModal();
+          loadWorkspaces();
+          return;
+        }
+      }
+      showAuthModal();
+    }
 
     async function loadWorkspaces() {
-      const res = await fetch(`${API}/workspaces`);
+      const res = await fetch(`${API}/workspaces`, {
+        headers: getAuthHeaders()
+      });
       const data = await res.json();
       const sel = document.getElementById('workspaceSelect');
       sel.innerHTML = '<option value="">Select workspace...</option>';
@@ -251,7 +570,7 @@
       if (!title) return;
       const res = await fetch(`${API}/workspaces`, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {...getAuthHeaders(), 'Content-Type': 'application/json'},
         body: JSON.stringify({title})
       });
       const w = await res.json();
@@ -273,13 +592,17 @@
 
     async function loadArtifacts() {
       try {
-        const res = await fetch(`${API}/workspaces/${workspace}/artifacts`);
+        const res = await fetch(`${API}/workspaces/${workspace}/artifacts`, {
+          headers: getAuthHeaders()
+        });
         const data = await res.json();
         const graphs = (data.artifacts || []).filter(a => a.type === 'application/vnd.graph+json');
         if (graphs.length > 0) {
           // Load the most recent graph
           const graph = graphs[graphs.length - 1];
-          const full = await fetch(`${API}/workspaces/${workspace}/artifacts/${graph.id}`).then(r => r.json());
+          const full = await fetch(`${API}/workspaces/${workspace}/artifacts/${graph.id}`, {
+            headers: getAuthHeaders()
+          }).then(r => r.json());
           try {
             const graphData = JSON.parse(full.content || '{}');
             document.getElementById('graphTitle').textContent = full.title || 'Graph';
@@ -321,7 +644,7 @@
       try {
         const res = await fetch(`${API}/workspaces/${workspace}/chat`, {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: {...getAuthHeaders(), 'Content-Type': 'application/json'},
           body: JSON.stringify({message: msg})
         });
         
@@ -737,7 +1060,8 @@
       }
     }
 
-    loadWorkspaces();
+    // Initialize
+    checkAuth();
   </script>
 </body>
 </html>

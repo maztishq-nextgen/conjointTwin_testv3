@@ -46,7 +46,11 @@ When user asks to "create a mind map" or "visualize as a graph":
   * Example: fetch_url(url, chunk_index=0) then fetch_url(url, chunk_index=1)
 - **create_graph(title, graph_type)** - Initialize mind map (call FIRST)
 - **add_node(artifact_id, id, label, level)** - Add single node
+  * level is for visual hierarchy (0=central, 1=core, 2=branch, 3=detail, 4+=deeper)
 - **add_edge(artifact_id, source, target, relationship_type)** - Connect nodes
+  * Edges can connect nodes at ANY level (e.g., level 4 can connect to level 2)
+  * Use 'contains' for hierarchical parent-child relationships
+  * Use 'related', 'influences', 'causal_positive', 'causal_negative' for cross-level connections
 - **finish_graph(artifact_id)** - Finalize graph
 - **list_graphs()** - Find existing graphs
 
@@ -56,24 +60,45 @@ When user asks to "create a mind map" or "visualize as a graph":
 3. create_graph → get artifact_id
 4. Batch add_node calls (parallelize)
 5. Batch add_edge calls (parallelize)
+   * Add hierarchical edges (contains) for tree structure
+   * Add cross-level edges (related, influences, causal) for connections between different branches/levels
 6. finish_graph
 
-**Levels:**
+**Node Levels (for layout):**
 - L0: Central node (1 node)
 - L1: Core concepts (2-4 nodes)
 - L2: Branches (3-6 nodes)
 - L3: Details (4-8 nodes)
 - L4+: Deeper details (optional)
 
+**Relationship Types:**
+- **contains**: Parent-child hierarchy (typically same or adjacent levels)
+- **related**: General association (any levels)
+- **influences**: One affects another (any levels)
+- **causal_positive**: Causes increase/positive effect (any levels)
+- **causal_negative**: Causes decrease/negative effect (any levels)
+
 **Constraints:**
 - Total nodes: 10-20
 - Node labels: 2-5 words
 - For follow-ups: edit existing graph
+- Create cross-level connections when concepts relate across different branches
+
+**Expanding Existing Graphs:**
+When user asks to "expand on [node_name]" or "elaborate on [topic]" in context of a graph:
+1. Use list_graphs() to find the relevant graph artifact_id
+2. Add new nodes as children/related to the specified node
+3. Connect new nodes with appropriate edges (contains for hierarchy, related/influences for associations)
+4. Use finish_graph() when done
+5. DO NOT just provide text explanation - actually modify the graph structure
+
+Example: "expand on agriculture" → add nodes like "crop_types", "livestock_systems", "soil_management", etc. as children or related nodes
 </mind_map_creation_mode>
 
 <decision_logic>
 - If user asks a QUESTION about documents → Answer using file search results
 - If user asks to CREATE/VISUALIZE a mind map → Use graph tools
+- If user asks to EXPAND/ELABORATE on a node in a graph → Use graph tools to add nodes
 - If user asks about CURRENT EVENTS → Use web_search first
 - Default mode: Answer questions directly, create graphs only when explicitly requested
 </decision_logic>"""
@@ -301,6 +326,154 @@ class ChatAgentResponses:
         except Exception as e:
             yield {"type": "error", "content": f"Error: {str(e)}"}
             yield {"type": "thinking_end", "content": ""}
+
+    async def explain_node_stream(
+        self,
+        artifact_id: str,
+        node_id: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream explanation of a specific node in a graph."""
+        try:
+            # Get the graph artifact
+            artifact = self.store.get_artifact(artifact_id)
+            if not artifact:
+                yield {"type": "error", "content": f"Artifact not found: {artifact_id}"}
+                return
+            
+            # Parse graph data
+            import json as json_module
+            graph_data = json_module.loads(artifact["content"])
+            
+            # Find the node
+            node = None
+            for n in graph_data.get("nodes", []):
+                if n["id"] == node_id:
+                    node = n
+                    break
+            
+            if not node:
+                yield {"type": "error", "content": f"Node not found: {node_id}"}
+                return
+            
+            # Find connected edges
+            edges = graph_data.get("edges", [])
+            incoming = [e for e in edges if e["target"] == node_id]
+            outgoing = [e for e in edges if e["source"] == node_id]
+            
+            # Build context prompt
+            prompt = f"""Explain this node from a {graph_data.get('graph_type', 'graph')}:
+
+Node: {node['label']} (ID: {node_id}, Level: {node.get('level', 'unknown')})
+
+Connected nodes:
+- {len(incoming)} incoming connections: {', '.join([e['source'] for e in incoming[:5]])}
+- {len(outgoing)} outgoing connections: {', '.join([e['target'] for e in outgoing[:5]])}
+
+Provide a clear, concise explanation (2-3 sentences) of:
+1. What this node represents
+2. Its role in the overall structure
+3. Key relationships with other nodes"""
+
+            yield {"type": "thinking_start", "content": ""}
+            
+            # Call OpenAI for explanation
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant explaining graph structures."},
+                    {"role": "user", "content": prompt}
+                ],
+                stream=True
+            )
+            
+            yield {"type": "thinking_end", "content": ""}
+            
+            full_content = ""
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    full_content += content
+                    yield {"type": "content", "content": content}
+            
+            yield {"type": "done", "content": full_content}
+            
+        except Exception as e:
+            yield {"type": "error", "content": f"Error: {str(e)}"}
+
+    async def explain_edge_stream(
+        self,
+        artifact_id: str,
+        source_id: str,
+        target_id: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream explanation of a specific edge/relationship in a graph."""
+        try:
+            # Get the graph artifact
+            artifact = self.store.get_artifact(artifact_id)
+            if not artifact:
+                yield {"type": "error", "content": f"Artifact not found: {artifact_id}"}
+                return
+            
+            # Parse graph data
+            import json as json_module
+            graph_data = json_module.loads(artifact["content"])
+            
+            # Find source and target nodes
+            nodes = graph_data.get("nodes", [])
+            source_node = next((n for n in nodes if n["id"] == source_id), None)
+            target_node = next((n for n in nodes if n["id"] == target_id), None)
+            
+            if not source_node:
+                yield {"type": "error", "content": f"Source node not found: {source_id}"}
+                return
+            if not target_node:
+                yield {"type": "error", "content": f"Target node not found: {target_id}"}
+                return
+            
+            # Find the edge
+            edges = graph_data.get("edges", [])
+            edge = next((e for e in edges if e["source"] == source_id and e["target"] == target_id), None)
+            
+            if not edge:
+                yield {"type": "error", "content": f"Edge not found between {source_id} and {target_id}"}
+                return
+            
+            # Build context prompt
+            prompt = f"""Explain this relationship in a {graph_data.get('graph_type', 'graph')}:
+
+Relationship: {source_node['label']} (L{source_node.get('level')}) → {target_node['label']} (L{target_node.get('level')})
+Type: {edge.get('relationship_type', 'unknown')}
+
+Provide a clear, concise explanation (2-3 sentences) of:
+1. What this relationship represents
+2. How the source affects or relates to the target
+3. Why this connection is important in the graph structure"""
+
+            yield {"type": "thinking_start", "content": ""}
+            
+            # Call OpenAI for explanation
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant explaining graph relationships."},
+                    {"role": "user", "content": prompt}
+                ],
+                stream=True
+            )
+            
+            yield {"type": "thinking_end", "content": ""}
+            
+            full_content = ""
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    full_content += content
+                    yield {"type": "content", "content": content}
+            
+            yield {"type": "done", "content": full_content}
+            
+        except Exception as e:
+            yield {"type": "error", "content": f"Error: {str(e)}"}
 
 
 def format_chat_sse(event: Dict[str, Any]) -> str:

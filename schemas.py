@@ -100,6 +100,51 @@ class MessageListResponse(BaseModel):
     messages: List[ChatMessageResponse]
 
 
+class ExplainNodeRequest(BaseModel):
+    node_id: str = Field(..., description="Node ID to explain")
+    artifact_id: str = Field(..., description="Graph artifact ID containing the node")
+
+
+class ExplainEdgeRequest(BaseModel):
+    source_id: str = Field(..., description="Source node ID")
+    target_id: str = Field(..., description="Target node ID")
+    artifact_id: str = Field(..., description="Graph artifact ID containing the edge")
+
+
+# Authentication schemas
+class UserCreate(BaseModel):
+    email: str = Field(..., description="User email address")
+    password: str = Field(..., min_length=8, description="User password (min 8 characters)")
+    name: Optional[str] = Field(None, description="User display name")
+
+
+class UserLogin(BaseModel):
+    email: str = Field(..., description="User email address")
+    password: str = Field(..., description="User password")
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: Optional[str] = None
+    is_active: bool = True
+    total_tokens: int = 0
+    total_cost: float = 0.0
+    request_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class TokenRefreshRequest(BaseModel):
+    refresh_token: str = Field(..., description="Refresh token to exchange for new tokens")
+
+
 class GraphNode(BaseModel):
     id: str
     label: str
