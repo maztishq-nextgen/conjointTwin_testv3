@@ -254,7 +254,7 @@ class ChatAgentResponses:
                         input=function_call_outputs,
                         tools=tools,
                         stream=True,
-                        reasoning={"effort": "medium", "summary": "auto"},
+                        reasoning={"effort": "low", "summary": "concise"},
                         include=include_list,
                     )
                 elif input_items:
@@ -269,7 +269,7 @@ class ChatAgentResponses:
                             input=input_items,
                             tools=tools,
                             stream=True,
-                            reasoning={"effort": "medium", "summary": "auto"},
+                            reasoning={"effort": "low", "summary": "concise"},
                             include=include_list,
                         )
                     else:
@@ -281,7 +281,7 @@ class ChatAgentResponses:
                             input=input_items,
                             tools=tools,
                             stream=True,
-                            reasoning={"effort": "medium", "summary": "auto"},
+                            reasoning={"effort": "low", "summary": "concise"},
                             include=include_list,
                         )
                     # Clear input_items after first use
@@ -515,7 +515,7 @@ Provide a clear, concise explanation (2-3 sentences) of:
                 ],
                 tools=[],  # Empty tools list like chat_stream
                 stream=True,
-                reasoning={"effort": "medium", "summary": "auto"},
+                reasoning={"effort": "low", "summary": "concise"},
                 include=["reasoning.encrypted_content"]
             )
             
@@ -620,7 +620,7 @@ Provide a clear, concise explanation (2-3 sentences) of:
                 ],
                 tools=[],  # Empty tools list like chat_stream
                 stream=True,
-                reasoning={"effort": "medium", "summary": "auto"},
+                reasoning={"effort": "low", "summary": "concise"},
                 include=["reasoning.encrypted_content"]
             )
             
