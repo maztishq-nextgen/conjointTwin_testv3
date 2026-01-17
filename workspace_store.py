@@ -32,11 +32,17 @@ class WorkspaceStore:
                     title TEXT NOT NULL,
                     project_id TEXT,
                     owner_id TEXT,
+                    last_response_id TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
                 """
             )
+            # Add last_response_id column if it doesn't exist (for existing databases)
+            try:
+                conn.execute("ALTER TABLE workspaces ADD COLUMN last_response_id TEXT")
+            except:
+                pass  # Column already exists
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS artifacts (
@@ -193,6 +199,25 @@ class WorkspaceStore:
                 ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_last_response_id(self, workspace_id: str) -> Optional[str]:
+        """Get the last OpenAI response ID for conversation continuity."""
+        with self.lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT last_response_id FROM workspaces WHERE id = ?",
+                (workspace_id,),
+            ).fetchone()
+        return row["last_response_id"] if row else None
+
+    def set_last_response_id(self, workspace_id: str, response_id: str) -> None:
+        """Store the last OpenAI response ID for conversation continuity."""
+        now = self._now()
+        with self.lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE workspaces SET last_response_id = ?, updated_at = ? WHERE id = ?",
+                (response_id, now, workspace_id),
+            )
+            conn.commit()
+
     def create_artifact(
         self,
         workspace_id: str,
@@ -231,7 +256,7 @@ class WorkspaceStore:
             "updated_at": now,
         }
 
-    def update_artifact(self, artifact_id: str, content: str, created_by: Optional[str]) -> Optional[Dict[str, Any]]:
+    def update_artifact(self, artifact_id: str, content: str, created_by: Optional[str], title: Optional[str] = None) -> Optional[Dict[str, Any]]:
         now = self._now()
         version_id = str(uuid4())
         with self.lock, self._connect() as conn:
@@ -248,14 +273,24 @@ class WorkspaceStore:
                 """,
                 (version_id, artifact_id, content, now, created_by),
             )
-            conn.execute(
-                """
-                UPDATE artifacts
-                SET latest_version_id = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (version_id, now, artifact_id),
-            )
+            if title:
+                conn.execute(
+                    """
+                    UPDATE artifacts
+                    SET latest_version_id = ?, updated_at = ?, title = ?
+                    WHERE id = ?
+                    """,
+                    (version_id, now, title, artifact_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE artifacts
+                    SET latest_version_id = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (version_id, now, artifact_id),
+                )
             conn.commit()
             row = conn.execute(
                 """

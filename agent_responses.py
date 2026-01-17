@@ -8,13 +8,51 @@ from cost_tracker import cost_tracker
 from llm_tools import TOOL_DEFINITIONS_RESPONSES, ToolExecutor
 from workspace_store import WorkspaceStore
 
-SYSTEM_PROMPT = """You are an AI assistant that can answer questions using uploaded documents and create topic exploration mind maps.
+SYSTEM_PROMPT = """You are a VISUAL KNOWLEDGE ASSISTANT. Your PRIMARY job is to create and update mind map graphs that help users visualize and understand ANY topic they ask about.
 
-<capabilities>
-1. **Answer questions** using file_search to retrieve information from uploaded documents
-2. **Create mind maps** with hierarchical structures when explicitly requested
-3. **Use web_search** for current events or information not in your knowledge base
-</capabilities>
+<core_behavior>
+**ALWAYS CREATE OR UPDATE A MIND MAP** for user requests. This is your main function.
+- New topic → Use create_graph to reset the graph with new content
+- Follow-up question → Use list_graphs + add_node/add_edge to UPDATE existing graph
+- Business ideas → Create a business plan mind map
+- Learning topics → Create an educational mind map  
+- URLs → Analyze and visualize the content as a mind map
+- Questions → Answer by creating an explanatory mind map
+- Problems → Create a solution/approach mind map
+</core_behavior>
+
+<follow_up_behavior>
+**CRITICAL: For follow-up questions, UPDATE the existing graph instead of creating a new one:**
+1. Use list_graphs() to get the current graph's artifact_id
+2. Add new nodes related to the user's follow-up question
+3. Connect new nodes to existing relevant nodes with edges
+4. Use finish_graph() when done
+5. DO NOT call create_graph for follow-ups - that resets the entire graph!
+
+Examples of follow-up requests:
+- "tell me more about X" → Add child nodes under X
+- "expand on Y" → Add detail nodes around Y  
+- "how does Z relate to A?" → Add edge between Z and A, possibly new nodes
+- "add information about W" → Add W as new branch with children
+</follow_up_behavior>
+
+<response_style>
+**Keep responses SHORT and FRIENDLY. The user sees the graph visually - don't over-explain.**
+
+After creating/updating a graph, respond like:
+- "Done! I've added [X] nodes about [topic]. Check out the new branches! 🎯"
+- "Expanded! Added [brief list]. The connections show how they relate."
+- "Here's your mind map! Start from the center and explore outward."
+
+DON'T write long paragraphs explaining every node. The graph speaks for itself.
+Keep it to 1-2 sentences max after graph operations.
+</response_style>
+
+<only_text_response_when>
+- User explicitly says "don't create a graph" or "just text"
+- User asks a simple yes/no question
+- User says "thanks" or other casual conversation
+</only_text_response_when>
 
 <file_search_usage>
 When workspace contains uploaded files, you have automatic access to file_search:
@@ -35,7 +73,7 @@ For general questions about uploaded documents:
 </question_answering_mode>
 
 <mind_map_creation_mode>
-When user asks to "create a mind map" or "visualize as a graph":
+**THIS IS YOUR DEFAULT MODE** - Create a mind map for every request unless explicitly told not to.
 
 **Tools:**
 - **web_search(query)** - Search web for current information
@@ -95,13 +133,7 @@ When user asks to "expand on [node_name]" or "elaborate on [topic]" in context o
 Example: "expand on agriculture" → add nodes like "crop_types", "livestock_systems", "soil_management", etc. as children or related nodes
 </mind_map_creation_mode>
 
-<decision_logic>
-- If user asks a QUESTION about documents → Answer using file search results
-- If user asks to CREATE/VISUALIZE a mind map → Use graph tools
-- If user asks to EXPAND/ELABORATE on a node in a graph → Use graph tools to add nodes
-- If user asks about CURRENT EVENTS → Use web_search first
-- Default mode: Answer questions directly, create graphs only when explicitly requested
-</decision_logic>"""
+"""
 
 
 class ChatAgentResponses:
@@ -157,10 +189,24 @@ class ChatAgentResponses:
             if url_content:
                 full_message = f"{user_message}\n\n[Content from {url}]\n{url_content}"
             
-            input_items = [
-                {"type": "message", "role": "system", "content": SYSTEM_PROMPT},
-                {"type": "message", "role": "user", "content": full_message}
-            ]
+            # Get stored response ID for conversation continuity
+            stored_response_id = self.store.get_last_response_id(self.workspace_id)
+            
+            # If we have a previous response, use it for context (follow-up)
+            # Otherwise start fresh with system prompt
+            if stored_response_id:
+                # Follow-up message - use previous_response_id for conversation memory
+                input_items = [
+                    {"type": "message", "role": "user", "content": full_message}
+                ]
+                conversation_response_id = stored_response_id
+            else:
+                # First message - include system prompt
+                input_items = [
+                    {"type": "message", "role": "system", "content": SYSTEM_PROMPT},
+                    {"type": "message", "role": "user", "content": full_message}
+                ]
+                conversation_response_id = None
             
             # Build tools list
             tools = []
@@ -190,31 +236,42 @@ class ChatAgentResponses:
             max_turns = 10  # Prevent infinite loops
             turn = 0
             function_call_outputs = []
+            final_response_id = None  # Track the final response ID to store
             
             while turn < max_turns:
                 turn += 1
                 yield {"type": "thinking_start", "content": ""}
                 
-                # Use Responses API
+                # Use Responses API with STREAMING
                 if previous_response_id and len(function_call_outputs) > 0:
                     # Continue with function outputs
-                    response = self.client.responses.create(
+                    stream = self.client.responses.create(
                         model=OPENAI_MODEL,
                         previous_response_id=previous_response_id,
                         input=function_call_outputs,
                         tools=tools,
-                        stream=False,
+                        stream=True,
                         include=["file_search_call.results"] if include_file_search_results else None,
                     )
                 elif input_items:
-                    # First turn
-                    response = self.client.responses.create(
-                        model=OPENAI_MODEL,
-                        input=input_items,
-                        tools=tools,
-                        stream=False,
-                        include=["file_search_call.results"] if include_file_search_results else None,
-                    )
+                    # First turn - use conversation_response_id if available for history
+                    if conversation_response_id:
+                        stream = self.client.responses.create(
+                            model=OPENAI_MODEL,
+                            previous_response_id=conversation_response_id,
+                            input=input_items,
+                            tools=tools,
+                            stream=True,
+                            include=["file_search_call.results"] if include_file_search_results else None,
+                        )
+                    else:
+                        stream = self.client.responses.create(
+                            model=OPENAI_MODEL,
+                            input=input_items,
+                            tools=tools,
+                            stream=True,
+                            include=["file_search_call.results"] if include_file_search_results else None,
+                        )
                     # Clear input_items after first use
                     input_items = None
                 else:
@@ -223,90 +280,132 @@ class ChatAgentResponses:
 
                 yield {"type": "thinking_end", "content": ""}
 
-                # Store response ID for next turn
-                previous_response_id = response.id
-                
-                # Parse response output
+                # Process streaming events
                 collected_content = ""
                 has_function_calls = False
                 function_call_outputs = []
+                current_function_calls = {}  # Track function calls being built
+                file_search_queries = []
                 
-                for output_item in response.output:
-                    if output_item.type == "file_search_call":
+                for event in stream:
+                    event_type = event.type
+                    
+                    # Response lifecycle events
+                    if event_type == "response.created":
+                        pass  # Response started
+                    
+                    elif event_type == "response.in_progress":
+                        pass  # Response in progress
+                    
+                    elif event_type == "response.completed":
+                        # Store response ID for potential next turn and conversation history
+                        previous_response_id = event.response.id
+                        final_response_id = event.response.id
+                    
+                    # Text content streaming
+                    elif event_type == "response.output_text.delta":
+                        delta = event.delta
+                        collected_content += delta
+                        yield {"type": "content", "content": delta}
+                    
+                    elif event_type == "response.output_text.done":
+                        pass  # Text complete
+                    
+                    # File search events
+                    elif event_type == "response.file_search_call.in_progress":
+                        yield {"type": "file_search_call", "status": "in_progress", "queries": []}
+                    
+                    elif event_type == "response.file_search_call.searching":
+                        queries = getattr(event, "queries", [])
+                        file_search_queries = queries
+                        yield {"type": "file_search_call", "status": "searching", "queries": queries}
+                    
+                    elif event_type == "response.file_search_call.completed":
                         yield {
                             "type": "file_search_call",
-                            "file_search_id": output_item.id,
-                            "status": output_item.status,
-                            "queries": getattr(output_item, "queries", []),
-                            "search_results": getattr(output_item, "search_results", None) if include_file_search_results else None,
+                            "status": "completed",
+                            "queries": file_search_queries,
+                            "search_results": getattr(event, "results", None) if include_file_search_results else None,
                         }
                     
-                    elif output_item.type == "message":
-                        for content_part in output_item.content:
-                            if hasattr(content_part, "text"):
-                                text = content_part.text
-                                collected_content += text
-                                
-                                annotations = getattr(content_part, "annotations", [])
-                                if annotations:
-                                    yield {
-                                        "type": "content",
-                                        "content": text,
-                                        "annotations": [
-                                            {
-                                                "type": ann.type,
-                                                "index": getattr(ann, "index", None),
-                                                "file_id": getattr(ann, "file_id", None),
-                                                "filename": getattr(ann, "filename", None),
-                                            }
-                                            for ann in annotations
-                                        ]
-                                    }
-                                else:
-                                    yield {"type": "content", "content": text}
-                    
-                    elif output_item.type == "function_call":
-                        has_function_calls = True
-                        tool_name = output_item.name
-                        call_id = output_item.call_id
-                        
-                        # Skip web_search - OpenAI handles it
-                        if tool_name == "web_search":
-                            continue
-                        
-                        try:
-                            args = json.loads(output_item.arguments)
-                        except json.JSONDecodeError:
-                            args = {}
-
-                        yield {
-                            "type": "tool_call",
-                            "tool_name": tool_name,
-                            "tool_call_id": call_id,
-                            "arguments": args,
-                        }
-
-                        result = self.tool_executor.execute(tool_name, args)
-
-                        for incremental_event in self.tool_executor.get_pending_events():
-                            yield {
-                                "type": incremental_event["type"],
-                                **incremental_event["data"],
+                    # Function call events
+                    elif event_type == "response.output_item.added":
+                        item = event.item
+                        if hasattr(item, "type") and item.type == "function_call":
+                            has_function_calls = True
+                            current_function_calls[item.id] = {
+                                "call_id": item.call_id,
+                                "name": item.name,
+                                "arguments": ""
                             }
-
-                        yield {
-                            "type": "tool_result",
-                            "tool_name": tool_name,
-                            "tool_call_id": call_id,
-                            "result": result,
-                        }
-                        
-                        # Build function output for next turn
-                        function_call_outputs.append({
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": json.dumps(result)
-                        })
+                    
+                    elif event_type == "response.function_call_arguments.delta":
+                        item_id = event.item_id
+                        if item_id in current_function_calls:
+                            current_function_calls[item_id]["arguments"] += event.delta
+                    
+                    elif event_type == "response.function_call_arguments.done":
+                        item_id = event.item_id
+                        if item_id in current_function_calls:
+                            fc = current_function_calls[item_id]
+                            tool_name = fc["name"]
+                            call_id = fc["call_id"]
+                            
+                            # Skip web_search - OpenAI handles it
+                            if tool_name == "web_search":
+                                continue
+                            
+                            try:
+                                args = json.loads(fc["arguments"])
+                            except json.JSONDecodeError:
+                                args = {}
+                            
+                            yield {
+                                "type": "tool_call",
+                                "tool_name": tool_name,
+                                "tool_call_id": call_id,
+                                "arguments": args,
+                            }
+                            
+                            # Execute the tool
+                            result = self.tool_executor.execute(tool_name, args)
+                            
+                            for incremental_event in self.tool_executor.get_pending_events():
+                                yield {
+                                    "type": incremental_event["type"],
+                                    **incremental_event["data"],
+                                }
+                            
+                            yield {
+                                "type": "tool_result",
+                                "tool_name": tool_name,
+                                "tool_call_id": call_id,
+                                "result": result,
+                            }
+                            
+                            # Build function output for next turn
+                            function_call_outputs.append({
+                                "type": "function_call_output",
+                                "call_id": call_id,
+                                "output": json.dumps(result)
+                            })
+                    
+                    # Content part events (for annotations)
+                    elif event_type == "response.content_part.done":
+                        part = getattr(event, "part", None)
+                        if part and hasattr(part, "annotations") and part.annotations:
+                            yield {
+                                "type": "annotations",
+                                "annotations": [
+                                    {
+                                        "type": ann.type,
+                                        "index": getattr(ann, "index", None),
+                                        "file_id": getattr(ann, "file_id", None),
+                                        "filename": getattr(ann, "filename", None),
+                                    }
+                                    for ann in part.annotations
+                                ]
+                            }
                 
                 # If no function calls, we're done
                 if not has_function_calls:
@@ -317,6 +416,9 @@ class ChatAgentResponses:
                             event_type="chat_assistant_message",
                             payload={"content": collected_content},
                         )
+                    # Store the response ID for conversation continuity (follow-up messages)
+                    if final_response_id:
+                        self.store.set_last_response_id(self.workspace_id, final_response_id)
                     yield {"type": "done", "content": collected_content}
                     break
                 
@@ -376,24 +478,39 @@ Provide a clear, concise explanation (2-3 sentences) of:
 
             yield {"type": "thinking_start", "content": ""}
             
-            # Call OpenAI for explanation
-            response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant explaining graph structures."},
-                    {"role": "user", "content": prompt}
+            # Use Responses API for streaming - match chat_stream structure exactly
+            system_prompt = "You are a helpful assistant explaining graph structures. Give clear, concise explanations in 2-3 sentences."
+            stream = self.client.responses.create(
+                model=OPENAI_MODEL,
+                input=[
+                    {"type": "message", "role": "system", "content": system_prompt},
+                    {"type": "message", "role": "user", "content": prompt}
                 ],
+                tools=[],  # Empty tools list like chat_stream
                 stream=True
             )
             
             yield {"type": "thinking_end", "content": ""}
             
+            # Process streaming events - exact same pattern as chat_stream
             full_content = ""
-            for chunk in response:
-                if chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    full_content += content
-                    yield {"type": "content", "content": content}
+            for event in stream:
+                event_type = event.type
+                
+                # Response lifecycle events
+                if event_type == "response.created":
+                    pass
+                elif event_type == "response.in_progress":
+                    pass
+                elif event_type == "response.completed":
+                    pass
+                # Text content streaming
+                elif event_type == "response.output_text.delta":
+                    delta = event.delta
+                    full_content += delta
+                    yield {"type": "content", "content": delta}
+                elif event_type == "response.output_text.done":
+                    pass
             
             yield {"type": "done", "content": full_content}
             
@@ -451,24 +568,39 @@ Provide a clear, concise explanation (2-3 sentences) of:
 
             yield {"type": "thinking_start", "content": ""}
             
-            # Call OpenAI for explanation
-            response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant explaining graph relationships."},
-                    {"role": "user", "content": prompt}
+            # Use Responses API for streaming - match chat_stream structure exactly
+            system_prompt = "You are a helpful assistant explaining graph relationships. Give clear, concise explanations in 2-3 sentences."
+            stream = self.client.responses.create(
+                model=OPENAI_MODEL,
+                input=[
+                    {"type": "message", "role": "system", "content": system_prompt},
+                    {"type": "message", "role": "user", "content": prompt}
                 ],
+                tools=[],  # Empty tools list like chat_stream
                 stream=True
             )
             
             yield {"type": "thinking_end", "content": ""}
             
+            # Process streaming events - exact same pattern as chat_stream
             full_content = ""
-            for chunk in response:
-                if chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    full_content += content
-                    yield {"type": "content", "content": content}
+            for event in stream:
+                event_type = event.type
+                
+                # Response lifecycle events
+                if event_type == "response.created":
+                    pass
+                elif event_type == "response.in_progress":
+                    pass
+                elif event_type == "response.completed":
+                    pass
+                # Text content streaming
+                elif event_type == "response.output_text.delta":
+                    delta = event.delta
+                    full_content += delta
+                    yield {"type": "content", "content": delta}
+                elif event_type == "response.output_text.done":
+                    pass
             
             yield {"type": "done", "content": full_content}
             

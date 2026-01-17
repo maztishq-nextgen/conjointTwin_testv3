@@ -268,6 +268,122 @@
     }
     .btn-logout:hover { background: #444; }
     .hidden { display: none !important; }
+    
+    /* File Upload Panel */
+    .file-panel {
+      position: absolute;
+      top: 50px;
+      right: 20px;
+      width: 300px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 16px;
+      z-index: 100;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .file-panel h3 { font-size: 14px; margin-bottom: 12px; }
+    .file-upload-area {
+      border: 2px dashed #444;
+      border-radius: 6px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      margin-bottom: 12px;
+    }
+    .file-upload-area:hover { border-color: #2563eb; background: #111; }
+    .file-list { margin-top: 12px; }
+    .file-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px;
+      background: #222;
+      border-radius: 4px;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+    .file-item .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .file-item .file-status { color: #22c55e; margin-left: 8px; }
+    .btn-close-panel {
+      background: #333;
+      border: none;
+      color: #888;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      float: right;
+      font-size: 11px;
+    }
+    
+    /* URL Input */
+    .url-input-row {
+      display: flex;
+      gap: 8px;
+      padding: 8px 12px 0;
+      border-top: 1px solid #333;
+    }
+    .url-input-row input {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #444;
+      color: #888;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .url-input-row input:focus { outline: none; border-color: #2563eb; color: #e0e0e0; }
+    .url-input-row button {
+      background: none;
+      border: 1px solid #444;
+      color: #888;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .url-input-row button:hover { border-color: #2563eb; color: #2563eb; }
+    
+    /* Explanation Tooltip */
+    .explanation-tooltip {
+      position: fixed;
+      background: #1e1b4b;
+      border: 1px solid #6366f1;
+      border-radius: 8px;
+      padding: 12px 16px;
+      max-width: 400px;
+      z-index: 1000;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #e0e0e0;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+    .explanation-tooltip .close-btn {
+      float: right;
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0;
+      margin: -4px -4px 0 8px;
+    }
+    .explanation-tooltip h4 { margin: 0 0 8px 0; color: #a5b4fc; font-size: 13px; }
+    .explanation-tooltip .loading { color: #888; font-style: italic; }
+    
+    /* Button for file panel toggle */
+    .btn-files {
+      background: #222;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn-files:hover { background: #333; }
   </style>
 </head>
 <body>
@@ -275,6 +391,7 @@
     <h1>🧠 Graph Workspace</h1>
     <select id="workspaceSelect"><option value="">Select workspace...</option></select>
     <button onclick="createWorkspace()" class="btn-primary">+ New</button>
+    <button onclick="toggleFilePanel()" class="btn-files" id="filePanelBtn">📁 Files</button>
     <div class="user-info" id="userInfo">
       <span class="user-email" id="userEmail"></span>
       <button class="btn-logout" onclick="logout()">Logout</button>
@@ -322,9 +439,26 @@
     </div>
   </div>
   
+  <!-- File Upload Panel -->
+  <div class="file-panel hidden" id="filePanel">
+    <button class="btn-close-panel" onclick="toggleFilePanel()">✕</button>
+    <h3>📁 Vector Store Files</h3>
+    <div class="file-upload-area" onclick="document.getElementById('fileInput').click()">
+      <div style="font-size: 24px; margin-bottom: 8px;">📤</div>
+      <div style="font-size: 12px; color: #888;">Click to upload documents</div>
+      <div style="font-size: 10px; color: #666; margin-top: 4px;">PDF, TXT, DOC (max 512MB)</div>
+    </div>
+    <input type="file" id="fileInput" style="display: none;" multiple accept=".pdf,.txt,.doc,.docx" onchange="uploadFiles()">
+    <div class="file-list" id="fileList"></div>
+  </div>
+  
   <main>
     <div class="chat-panel">
       <div class="chat-messages" id="messages"></div>
+      <div class="url-input-row">
+        <input type="url" id="urlInput" placeholder="Optional: Paste URL for AI to analyze..." />
+        <button onclick="clearUrl()">✕</button>
+      </div>
       <div class="chat-input">
         <input type="text" id="input" placeholder="Ask to create a graph..." onkeypress="if(event.key==='Enter')send()" />
         <button onclick="send()">Send</button>
@@ -364,6 +498,8 @@
     let accessToken = localStorage.getItem('accessToken');
     let refreshToken = localStorage.getItem('refreshToken');
     let currentUser = null;
+    let currentVectorStore = null;
+    let explanationTooltip = null;
 
     // Auth functions
     function showTab(tab) {
@@ -587,7 +723,19 @@
       nodePositions = {};
       document.getElementById('messages').innerHTML = '';
       clearGraph();
-      if (id) loadArtifacts();
+      if (id) {
+        loadArtifacts();
+        loadVectorStore();
+      }
+    }
+    
+    function clearUrl() {
+      document.getElementById('urlInput').value = '';
+    }
+    
+    function toggleFilePanel() {
+      const panel = document.getElementById('filePanel');
+      panel.classList.toggle('hidden');
     }
 
     async function loadArtifacts() {
@@ -625,11 +773,13 @@
 
     async function send() {
       const input = document.getElementById('input');
+      const urlInput = document.getElementById('urlInput');
       const msg = input.value.trim();
+      const url = urlInput.value.trim();
       if (!msg || !workspace) return;
       input.value = '';
       
-      addMessage('user', msg);
+      addMessage('user', msg + (url ? ` [${url}]` : ''));
       // Don't clear graph here - only clear when a NEW graph is created (graph_created event)
       
       let reasoningEl = null;
@@ -642,11 +792,16 @@
       document.getElementById('thinkingText').textContent = 'Analyzing...';
       
       try {
+        const requestBody = {message: msg};
+        if (url) requestBody.url = url;
+        
         const res = await fetch(`${API}/workspaces/${workspace}/chat`, {
           method: 'POST',
           headers: {...getAuthHeaders(), 'Content-Type': 'application/json'},
-          body: JSON.stringify({message: msg})
+          body: JSON.stringify(requestBody)
         });
+        
+        if (url) clearUrl();
         
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -694,6 +849,33 @@
           document.getElementById('thinkingText').textContent = 'Reasoning...';
           break;
         case 'thinking_end':
+          break;
+        case 'url_fetching':
+          addMessage('tool', `🌐 Fetching URL: ${e.url}`);
+          document.getElementById('thinkingText').textContent = `Fetching ${e.url}...`;
+          break;
+        case 'url_fetched':
+          addMessage('tool', `✅ Fetched: ${e.title || e.url}`);
+          break;
+        case 'url_fetch_error':
+          addMessage('tool', `❌ URL fetch failed: ${e.error}`);
+          break;
+        case 'file_search_call':
+          const status = e.status || '';
+          const queries = e.queries || [];
+          if (queries.length > 0) {
+            addMessage('tool', `📄 Searching files: ${queries.join(', ')}`);
+          }
+          document.getElementById('thinkingText').textContent = status === 'searching' ? 'Searching documents...' : 'File search complete';
+          break;
+        case 'annotations':
+          // Handle file citations from search results
+          if (e.annotations && e.annotations.length > 0) {
+            const citations = e.annotations.map(a => a.filename || a.file_id).filter(Boolean);
+            if (citations.length > 0) {
+              addMessage('tool', `📎 Citations: ${citations.join(', ')}`);
+            }
+          }
           break;
         case 'tool_call':
           markToolCalled();
@@ -833,6 +1015,9 @@
       
       g.appendChild(rect);
       g.appendChild(text);
+      g.classList.add('node');
+      g.style.cursor = 'pointer';
+      g.onclick = (evt) => showNodeExplanation(node.id, evt);
       svg.appendChild(g);
       
       // Animate in
@@ -893,6 +1078,8 @@
         const marker = edge.relationship_type === 'causal_positive' ? 'arrowGreen' :
                        edge.relationship_type === 'causal_negative' ? 'arrowRed' : 'arrow';
         line.setAttribute('marker-end', `url(#${marker})`);
+        line.style.cursor = 'pointer';
+        line.onclick = (evt) => showEdgeExplanation(edge.source, edge.target, evt);
         
         svg.appendChild(line);
         
@@ -1059,6 +1246,287 @@
         if (!node.level) node.level = 1;
       }
     }
+
+    // Vector Store & File Upload functions
+    async function loadVectorStore() {
+      if (!workspace) return;
+      
+      try {
+        const res = await fetch(`${API}/workspaces/${workspace}/vector-stores`, {
+          headers: getAuthHeaders()
+        });
+        const data = await res.json();
+        
+        if (data.vector_stores && data.vector_stores.length > 0) {
+          currentVectorStore = data.vector_stores[0];
+          await loadVectorStoreFiles();
+        } else {
+          // Create vector store if none exists
+          const createRes = await fetch(`${API}/workspaces/${workspace}/vector-stores`, {
+            method: 'POST',
+            headers: {...getAuthHeaders(), 'Content-Type': 'application/json'},
+            body: JSON.stringify({name: 'Workspace Documents'})
+          });
+          const vs = await createRes.json();
+          currentVectorStore = vs;
+        }
+      } catch (err) {
+        console.error('Failed to load vector store:', err);
+      }
+    }
+    
+    async function loadVectorStoreFiles() {
+      if (!currentVectorStore) return;
+      
+      try {
+        const res = await fetch(`${API}/workspaces/${workspace}/vector-stores/${currentVectorStore.id}/files`, {
+          headers: getAuthHeaders()
+        });
+        const data = await res.json();
+        
+        const fileList = document.getElementById('fileList');
+        fileList.innerHTML = '';
+        
+        if (data.files && data.files.length > 0) {
+          data.files.forEach(file => {
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            item.innerHTML = `
+              <span class="file-name" title="${file.filename}">${file.filename}</span>
+              <span class="file-status">✓</span>
+            `;
+            fileList.appendChild(item);
+          });
+        } else {
+          fileList.innerHTML = '<div style="text-align:center;color:#666;font-size:11px;padding:20px;">No files uploaded yet</div>';
+        }
+      } catch (err) {
+        console.error('Failed to load files:', err);
+      }
+    }
+    
+    async function uploadFiles() {
+      const fileInput = document.getElementById('fileInput');
+      const files = fileInput.files;
+      
+      if (files.length === 0 || !workspace || !currentVectorStore) return;
+      
+      for (const file of files) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          
+          const statusDiv = document.createElement('div');
+          statusDiv.className = 'file-item';
+          statusDiv.innerHTML = `
+            <span class="file-name">${file.name}</span>
+            <span class="file-status" style="color:#888;">Uploading...</span>
+          `;
+          document.getElementById('fileList').appendChild(statusDiv);
+          
+          const res = await fetch(`${API}/workspaces/${workspace}/vector-stores/${currentVectorStore.id}/files`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: formData
+          });
+          
+          if (res.ok) {
+            statusDiv.querySelector('.file-status').textContent = '✓';
+            statusDiv.querySelector('.file-status').style.color = '#22c55e';
+          } else {
+            statusDiv.querySelector('.file-status').textContent = '✗';
+            statusDiv.querySelector('.file-status').style.color = '#ef4444';
+          }
+        } catch (err) {
+          console.error('Upload failed:', err);
+        }
+      }
+      
+      fileInput.value = '';
+      setTimeout(() => loadVectorStoreFiles(), 2000);
+    }
+    
+    // Node & Edge Explanation functions
+    async function showNodeExplanation(nodeId, evt) {
+      evt.stopPropagation();
+      
+      // Remove existing tooltip
+      if (explanationTooltip) {
+        explanationTooltip.remove();
+        explanationTooltip = null;
+      }
+      
+      // Get current artifact
+      const res = await fetch(`${API}/workspaces/${workspace}/artifacts`, {
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      const graphs = (data.artifacts || []).filter(a => a.type === 'application/vnd.graph+json');
+      if (graphs.length === 0) return;
+      
+      const artifactId = graphs[graphs.length - 1].id;
+      const node = currentGraph.nodes.find(n => n.id === nodeId);
+      
+      // Create tooltip
+      const tooltip = document.createElement('div');
+      tooltip.className = 'explanation-tooltip';
+      tooltip.style.left = (evt.pageX + 10) + 'px';
+      tooltip.style.top = evt.pageY + 'px';
+      tooltip.innerHTML = `
+        <button class="close-btn" onclick="closeExplanationTooltip()">×</button>
+        <h4>🔍 ${node ? node.label : nodeId}</h4>
+        <div class="loading">Loading explanation...</div>
+      `;
+      document.body.appendChild(tooltip);
+      explanationTooltip = tooltip;
+      
+      // Fetch explanation via SSE
+      try {
+        const explainRes = await fetch(`${API}/workspaces/${workspace}/artifacts/${artifactId}/explain-node`, {
+          method: 'POST',
+          headers: {...getAuthHeaders(), 'Content-Type': 'application/json'},
+          body: JSON.stringify({artifact_id: artifactId, node_id: nodeId})
+        });
+        
+        const reader = explainRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let explanation = '';
+        const contentEl = tooltip.querySelector('.loading');  // Store reference ONCE
+        
+        while (true) {
+          const {done, value} = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, {stream: true});
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const e = JSON.parse(line.slice(6));
+                if (e.type === 'content') {
+                  explanation += e.content;
+                  contentEl.textContent = explanation;
+                  contentEl.className = '';
+                } else if (e.type === 'error') {
+                  contentEl.textContent = e.content || 'Error';
+                  contentEl.style.color = '#ef4444';
+                }
+              } catch (parseErr) {
+                console.error('SSE parse error:', parseErr);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Node explanation error:', err);
+        const contentEl = tooltip.querySelector('.loading');
+        if (contentEl) {
+          contentEl.textContent = 'Failed to load explanation';
+          contentEl.style.color = '#ef4444';
+        }
+      }
+    }
+    
+    async function showEdgeExplanation(sourceId, targetId, evt) {
+      evt.stopPropagation();
+      
+      // Remove existing tooltip
+      if (explanationTooltip) {
+        explanationTooltip.remove();
+        explanationTooltip = null;
+      }
+      
+      // Get current artifact
+      const res = await fetch(`${API}/workspaces/${workspace}/artifacts`, {
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      const graphs = (data.artifacts || []).filter(a => a.type === 'application/vnd.graph+json');
+      if (graphs.length === 0) return;
+      
+      const artifactId = graphs[graphs.length - 1].id;
+      const sourceNode = currentGraph.nodes.find(n => n.id === sourceId);
+      const targetNode = currentGraph.nodes.find(n => n.id === targetId);
+      
+      // Create tooltip
+      const tooltip = document.createElement('div');
+      tooltip.className = 'explanation-tooltip';
+      tooltip.style.left = (evt.pageX + 10) + 'px';
+      tooltip.style.top = evt.pageY + 'px';
+      tooltip.innerHTML = `
+        <button class="close-btn" onclick="closeExplanationTooltip()">×</button>
+        <h4>🔗 ${sourceNode?.label || sourceId} → ${targetNode?.label || targetId}</h4>
+        <div class="loading">Loading explanation...</div>
+      `;
+      document.body.appendChild(tooltip);
+      explanationTooltip = tooltip;
+      
+      // Fetch explanation via SSE
+      try {
+        const explainRes = await fetch(`${API}/workspaces/${workspace}/artifacts/${artifactId}/explain-edge`, {
+          method: 'POST',
+          headers: {...getAuthHeaders(), 'Content-Type': 'application/json'},
+          body: JSON.stringify({artifact_id: artifactId, source_id: sourceId, target_id: targetId})
+        });
+        
+        const reader = explainRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let explanation = '';
+        const contentEl = tooltip.querySelector('.loading');  // Store reference ONCE
+        
+        while (true) {
+          const {done, value} = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, {stream: true});
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const e = JSON.parse(line.slice(6));
+                if (e.type === 'content') {
+                  explanation += e.content;
+                  contentEl.textContent = explanation;
+                  contentEl.className = '';
+                } else if (e.type === 'error') {
+                  contentEl.textContent = e.content || 'Error';
+                  contentEl.style.color = '#ef4444';
+                }
+              } catch (parseErr) {
+                console.error('SSE parse error:', parseErr);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Edge explanation error:', err);
+        const contentEl = tooltip.querySelector('.loading');
+        if (contentEl) {
+          contentEl.textContent = 'Failed to load explanation';
+          contentEl.style.color = '#ef4444';
+        }
+      }
+    }
+    
+    function closeExplanationTooltip() {
+      if (explanationTooltip) {
+        explanationTooltip.remove();
+        explanationTooltip = null;
+      }
+    }
+    
+    // Close tooltip when clicking outside
+    document.addEventListener('click', (e) => {
+      if (explanationTooltip && !explanationTooltip.contains(e.target)) {
+        closeExplanationTooltip();
+      }
+    });
 
     // Initialize
     checkAuth();

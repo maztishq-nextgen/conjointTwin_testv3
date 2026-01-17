@@ -299,15 +299,24 @@ class ToolExecutor:
             "metadata": {"created_by": "assistant"},
         }
 
-        artifact = self.store.create_artifact(
-            workspace_id=self.workspace_id,
-            artifact_type="application/vnd.graph+json",
-            title=title,
-            content=json_module.dumps(graph_data),
-            created_by="assistant",
+        # Get the workspace's graph artifact (created when workspace was created)
+        existing_artifacts = self.store.list_artifacts(self.workspace_id)
+        existing_graph = next(
+            (a for a in existing_artifacts if a.get("type") == "application/vnd.graph+json"),
+            None
         )
 
-        artifact_id = artifact["id"]
+        if not existing_graph:
+            return {"error": "No graph artifact found for this workspace"}
+
+        # Reset the existing artifact with new content and title
+        artifact_id = existing_graph["id"]
+        self.store.update_artifact(
+            artifact_id=artifact_id,
+            content=json_module.dumps(graph_data),
+            created_by="assistant",
+            title=title,
+        )
 
         self._emit_incremental("graph_created", {
             "artifact_id": artifact_id,

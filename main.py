@@ -97,6 +97,23 @@ async def create_workspace(request: WorkspaceCreate):
         project_id=request.project_id,
         owner_id=request.owner_id,
     )
+    
+    # Auto-create the graph artifact for this workspace (one artifact per workspace)
+    import json
+    graph_data = {
+        "graph_type": "concept_map",
+        "nodes": [],
+        "edges": [],
+        "metadata": {"created_by": "system"},
+    }
+    store.create_artifact(
+        workspace_id=workspace["id"],
+        artifact_type="application/vnd.graph+json",
+        title="Workspace Graph",
+        content=json.dumps(graph_data),
+        created_by="system",
+    )
+    
     store.create_event(
         workspace_id=workspace["id"],
         event_type="workspace_created",
