@@ -508,6 +508,9 @@ while (true) {
 event: thinking_start
 data: {"type":"thinking_start","content":""}
 
+event: reasoning
+data: {"type":"reasoning","content":"The user is asking about..."}
+
 event: thinking_end
 data: {"type":"thinking_end","content":""}
 
@@ -534,6 +537,13 @@ The chat endpoint streams Server-Sent Events with the following types:
 
 <ResponseField name="thinking_start" type="object">
   AI begins processing - show loading indicator
+</ResponseField>
+
+<ResponseField name="reasoning" type="object">
+  Streams the model's internal reasoning content
+  <Expandable title="properties">
+    <ResponseField name="content" type="string">The reasoning text delta</ResponseField>
+  </Expandable>
 </ResponseField>
 
 <ResponseField name="thinking_end" type="object">
@@ -668,7 +678,7 @@ This allows iterative graph refinement - start broad, then drill into specific a
 </Note>
 
 <Warning>
-The AI will **modify the graph structure**, not just provide text explanations. To get text-only explanations of nodes or edges without modifying the graph, use the [explain-node](#explain-node-streaming) or [explain-edge](#explain-edge-streaming) endpoints.
+The AI will **modify the graph structure**, not just provide text explanations. To get text-only explanations of nodes or edges without modifying the graph, use the [Explain node](#explain-node-streaming) or [Explain edge](#explain-edge-streaming) endpoints.
 </Warning>
 
 ## Chat with URL
@@ -1105,6 +1115,138 @@ In the cross-level example above, notice:
 - Edge `e7`: Level 2 node (`branch_co2`) connects to level 3 node (`detail_sea_level`) under a different branch
 - These cross-level edges use `causal_positive` to show cause-and-effect relationships
 </Note>
+
+## Explain node (streaming)
+
+Return an SSE stream with a friendly explanation of a specific node without changing the graph.
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="artifact_id" type="string" required>
+  Artifact ID that owns the graph
+</ParamField>
+
+<ParamField body="node_id" type="string" required>
+  Node ID to explain
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -N -X POST http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-node \
+  -H "Content-Type: application/json" \
+  -d '{
+    "node_id": "core_ml"
+  }'
+```
+```python Python
+import requests
+
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-node",
+    json={"node_id": "core_ml"},
+    stream=True,
+)
+
+for line in response.iter_lines():
+    if line:
+        print(line.decode())
+```
+```
+```javascript JavaScript
+const res = await fetch(
+  `http://localhost:8000/workspaces/${workspaceId}/artifacts/${artifactId}/explain-node`,
+  {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({node_id: "core_ml"})
+  }
+);
+const reader = res.body.getReader();
+```
+</RequestExample>
+
+<ResponseExample>
+```text SSE
+event: thinking_start
+data: {"type":"thinking_start"}
+
+event: content
+data: {"type":"content","content":"Core ML covers supervised, unsupervised..."}
+
+event: done
+data: {"type":"done","content":"Full explanation text"}
+```
+</ResponseExample>
+
+<Note>
+Use this endpoint to show tooltip explanations in the UI without altering the artifact content.
+</Note>
+
+## Explain edge (streaming)
+
+Similar to node explanations but describes the relationship between two nodes.
+
+<ParamField path="workspace_id" type="string" required>
+  Workspace ID
+</ParamField>
+
+<ParamField path="artifact_id" type="string" required>
+  Artifact ID
+</ParamField>
+
+<ParamField body="source_id" type="string" required>
+  Source node ID
+</ParamField>
+
+<ParamField body="target_id" type="string" required>
+  Target node ID
+</ParamField>
+
+<RequestExample>
+```bash cURL
+curl -N -X POST http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-edge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_id": "core_ml",
+    "target_id": "branch_transformers"
+  }'
+```
+```python Python
+response = requests.post(
+    f"http://localhost:8000/workspaces/{workspace_id}/artifacts/{artifact_id}/explain-edge",
+    json={"source_id": "core_ml", "target_id": "branch_transformers"},
+    stream=True,
+)
+```
+```javascript JavaScript
+const response = await fetch(
+  `http://localhost:8000/workspaces/${workspaceId}/artifacts/${artifactId}/explain-edge`,
+  {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({source_id: "core_ml", target_id: "branch_transformers"})
+  }
+);
+```
+</RequestExample>
+
+<ResponseExample>
+```text SSE
+event: content
+data: {"type":"content","content":"Transformers evolve from the core ML branch by..."}
+
+event: done
+data: {"type":"done","content":"Full relationship explanation"}
+```
+</ResponseExample>
+
+<Tip>
+Use `source_id`/`target_id` to trace causal, related, or contains edges exactly as they appear in the graph JSON.
+</Tip>
+
+---
 
 ## Create artifact
 

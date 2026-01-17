@@ -413,7 +413,7 @@ async def explain_node(workspace_id: str, artifact_id: str, request: ExplainNode
 
     async def stream_generator():
         async for event in agent.explain_node_stream(
-            artifact_id=request.artifact_id,
+            artifact_id=artifact_id,
             node_id=request.node_id,
         ):
             yield format_chat_sse(event)
@@ -436,7 +436,7 @@ async def explain_edge(workspace_id: str, artifact_id: str, request: ExplainEdge
 
     async def stream_generator():
         async for event in agent.explain_edge_stream(
-            artifact_id=request.artifact_id,
+            artifact_id=artifact_id,
             source_id=request.source_id,
             target_id=request.target_id,
         ):

@@ -850,6 +850,14 @@
           break;
         case 'thinking_end':
           break;
+        case 'reasoning':
+          // Stream actual reasoning content from OpenAI
+          const reasoningEl = getReasoningEl();
+          if (reasoningEl) {
+            reasoningEl.textContent += e.content;
+            reasoningEl.scrollTop = reasoningEl.scrollHeight;
+          }
+          break;
         case 'url_fetching':
           addMessage('tool', `🌐 Fetching URL: ${e.url}`);
           document.getElementById('thinkingText').textContent = `Fetching ${e.url}...`;

@@ -102,13 +102,11 @@ class MessageListResponse(BaseModel):
 
 class ExplainNodeRequest(BaseModel):
     node_id: str = Field(..., description="Node ID to explain")
-    artifact_id: str = Field(..., description="Graph artifact ID containing the node")
 
 
 class ExplainEdgeRequest(BaseModel):
     source_id: str = Field(..., description="Source node ID")
     target_id: str = Field(..., description="Target node ID")
-    artifact_id: str = Field(..., description="Graph artifact ID containing the edge")
 
 
 # Authentication schemas

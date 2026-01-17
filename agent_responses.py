@@ -245,32 +245,44 @@ class ChatAgentResponses:
                 # Use Responses API with STREAMING
                 if previous_response_id and len(function_call_outputs) > 0:
                     # Continue with function outputs
+                    include_list = ["reasoning.encrypted_content"]
+                    if include_file_search_results:
+                        include_list.append("file_search_call.results")
                     stream = self.client.responses.create(
                         model=OPENAI_MODEL,
                         previous_response_id=previous_response_id,
                         input=function_call_outputs,
                         tools=tools,
                         stream=True,
-                        include=["file_search_call.results"] if include_file_search_results else None,
+                        reasoning={"effort": "medium", "summary": "auto"},
+                        include=include_list,
                     )
                 elif input_items:
                     # First turn - use conversation_response_id if available for history
                     if conversation_response_id:
+                        include_list = ["reasoning.encrypted_content"]
+                        if include_file_search_results:
+                            include_list.append("file_search_call.results")
                         stream = self.client.responses.create(
                             model=OPENAI_MODEL,
                             previous_response_id=conversation_response_id,
                             input=input_items,
                             tools=tools,
                             stream=True,
-                            include=["file_search_call.results"] if include_file_search_results else None,
+                            reasoning={"effort": "medium", "summary": "auto"},
+                            include=include_list,
                         )
                     else:
+                        include_list = ["reasoning.encrypted_content"]
+                        if include_file_search_results:
+                            include_list.append("file_search_call.results")
                         stream = self.client.responses.create(
                             model=OPENAI_MODEL,
                             input=input_items,
                             tools=tools,
                             stream=True,
-                            include=["file_search_call.results"] if include_file_search_results else None,
+                            reasoning={"effort": "medium", "summary": "auto"},
+                            include=include_list,
                         )
                     # Clear input_items after first use
                     input_items = None
@@ -301,6 +313,21 @@ class ChatAgentResponses:
                         # Store response ID for potential next turn and conversation history
                         previous_response_id = event.response.id
                         final_response_id = event.response.id
+                    
+                    # Reasoning content streaming
+                    elif event_type == "response.reasoning_text.delta":
+                        delta = event.delta
+                        yield {"type": "reasoning", "content": delta}
+                    
+                    elif event_type == "response.reasoning_summary_text.delta":
+                        delta = event.delta
+                        yield {"type": "reasoning", "content": delta}
+                    
+                    elif event_type == "response.reasoning_text.done":
+                        pass  # Reasoning complete
+                    
+                    elif event_type == "response.reasoning_summary_text.done":
+                        pass  # Reasoning summary complete
                     
                     # Text content streaming
                     elif event_type == "response.output_text.delta":
@@ -487,7 +514,9 @@ Provide a clear, concise explanation (2-3 sentences) of:
                     {"type": "message", "role": "user", "content": prompt}
                 ],
                 tools=[],  # Empty tools list like chat_stream
-                stream=True
+                stream=True,
+                reasoning={"effort": "medium", "summary": "auto"},
+                include=["reasoning.encrypted_content"]
             )
             
             yield {"type": "thinking_end", "content": ""}
@@ -504,6 +533,19 @@ Provide a clear, concise explanation (2-3 sentences) of:
                     pass
                 elif event_type == "response.completed":
                     pass
+                
+                # Reasoning content streaming
+                elif event_type == "response.reasoning_text.delta":
+                    delta = event.delta
+                    yield {"type": "reasoning", "content": delta}
+                elif event_type == "response.reasoning_summary_text.delta":
+                    delta = event.delta
+                    yield {"type": "reasoning", "content": delta}
+                elif event_type == "response.reasoning_text.done":
+                    pass
+                elif event_type == "response.reasoning_summary_text.done":
+                    pass
+
                 # Text content streaming
                 elif event_type == "response.output_text.delta":
                     delta = event.delta
@@ -577,7 +619,9 @@ Provide a clear, concise explanation (2-3 sentences) of:
                     {"type": "message", "role": "user", "content": prompt}
                 ],
                 tools=[],  # Empty tools list like chat_stream
-                stream=True
+                stream=True,
+                reasoning={"effort": "medium", "summary": "auto"},
+                include=["reasoning.encrypted_content"]
             )
             
             yield {"type": "thinking_end", "content": ""}
@@ -594,6 +638,19 @@ Provide a clear, concise explanation (2-3 sentences) of:
                     pass
                 elif event_type == "response.completed":
                     pass
+                
+                # Reasoning content streaming
+                elif event_type == "response.reasoning_text.delta":
+                    delta = event.delta
+                    yield {"type": "reasoning", "content": delta}
+                elif event_type == "response.reasoning_summary_text.delta":
+                    delta = event.delta
+                    yield {"type": "reasoning", "content": delta}
+                elif event_type == "response.reasoning_text.done":
+                    pass
+                elif event_type == "response.reasoning_summary_text.done":
+                    pass
+
                 # Text content streaming
                 elif event_type == "response.output_text.delta":
                     delta = event.delta
