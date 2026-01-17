@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Graph Workspace - Test UI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: #1a1a1a;
+      padding: 12px 20px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 16px; font-weight: 600; color: #fff; }
+    header select, header button {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    header button:hover { background: #3a3a3a; }
+    .btn-primary { background: #2563eb !important; border-color: #2563eb !important; }
+    .btn-primary:hover { background: #1d4ed8 !important; }
+    
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      overflow: hidden;
+    }
+    
+    .panel {
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #333;
+      overflow: hidden;
+    }
+    .panel:last-child { border-right: none; }
+    .panel-header {
+      padding: 12px 16px;
+      background: #1a1a1a;
+      border-bottom: 1px solid #333;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .panel-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    
+    /* Chat Panel */
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .message {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .message.user {
+      align-self: flex-end;
+      background: #2563eb;
+      color: #fff;
+    }
+    .message.assistant {
+      align-self: flex-start;
+      background: #2a2a2a;
+    }
+    .message.thinking {
+      align-self: flex-start;
+      background: #1a1a1a;
+      color: #888;
+      font-style: italic;
+      font-size: 12px;
+    }
+    .message.tool {
+      align-self: flex-start;
+      background: #1e3a1e;
+      border: 1px solid #2d5a2d;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    
+    .chat-input {
+      padding: 16px;
+      border-top: 1px solid #333;
+      display: flex;
+      gap: 8px;
+    }
+    .chat-input input {
+      flex: 1;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .chat-input input:focus { outline: none; border-color: #2563eb; }
+    .chat-input button {
+      background: #2563eb;
+      border: none;
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .chat-input button:hover { background: #1d4ed8; }
+    .chat-input button:disabled { opacity: 0.5; cursor: not-allowed; }
+    
+    /* Artifacts Panel */
+    .artifact-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .artifact-item {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 12px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .artifact-item:hover { border-color: #555; }
+    .artifact-item.selected { border-color: #2563eb; }
+    .artifact-item h3 { font-size: 14px; margin-bottom: 4px; }
+    .artifact-item p { font-size: 12px; color: #888; }
+    
+    /* Preview Panel */
+    .preview-frame {
+      flex: 1;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .preview-frame iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    .preview-code {
+      flex: 1;
+      background: #1a1a1a;
+      border-radius: 8px;
+      padding: 16px;
+      overflow: auto;
+      font-family: monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+      color: #a0e0a0;
+    }
+    
+    /* Events log */
+    .events-log {
+      font-family: monospace;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .event-item {
+      padding: 6px 10px;
+      background: #1a1a1a;
+      border-radius: 4px;
+      border-left: 3px solid #444;
+    }
+    .event-item.artifact_created { border-left-color: #22c55e; }
+    .event-item.artifact_updated { border-left-color: #3b82f6; }
+    .event-item.artifact_deleted { border-left-color: #ef4444; }
+    .event-item.tool_call { border-left-color: #f59e0b; }
+    
+    .tabs {
+      display: flex;
+      gap: 4px;
+    }
+    .tab {
+      padding: 6px 12px;
+      background: transparent;
+      border: none;
+      color: #888;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .tab.active { background: #2a2a2a; color: #fff; }
+    
+    .empty-state {
+      color: #666;
+      text-align: center;
+      padding: 40px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧪 Artifacts Workspace</h1>
+    <select id="workspaceSelect">
+      <option value="">Select workspace...</option>
+    </select>
+    <button onclick="createWorkspace()" class="btn-primary">+ New Workspace</button>
+    <button onclick="refreshArtifacts()">Refresh</button>
+    <span id="statusIndicator" style="margin-left: auto; font-size: 12px; color: #888;">Disconnected</span>
+  </header>
+  
+  <main>
+    <!-- Chat Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>💬 Chat</span>
+        <button onclick="clearMessages()" style="font-size: 11px; padding: 4px 8px;">Clear</button>
+      </div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="empty-state">Select a workspace to start chatting</div>
+      </div>
+      <div class="chat-input">
+        <input type="text" id="chatInput" placeholder="Ask the AI to create something..." onkeypress="if(event.key==='Enter')sendMessage()" disabled />
+        <button onclick="sendMessage()" id="sendBtn" disabled>Send</button>
+      </div>
+    </div>
+    
+    <!-- Right Panel: Artifacts + Preview -->
+    <div class="panel" style="display: flex; flex-direction: column;">
+      <div class="panel-header">
+        <span>📦 Artifacts</span>
+        <div class="tabs">
+          <button class="tab active" onclick="setView('preview')" id="tabPreview">Preview</button>
+          <button class="tab" onclick="setView('code')" id="tabCode">Code</button>
+          <button class="tab" onclick="setView('events')" id="tabEvents">Events</button>
+        </div>
+      </div>
+      
+      <!-- Artifact List -->
+      <div style="max-height: 200px; overflow-y: auto; border-bottom: 1px solid #333;">
+        <div class="panel-content artifact-list" id="artifactList">
+          <div class="empty-state">No artifacts yet</div>
+        </div>
+      </div>
+      
+      <!-- Preview/Code/Events -->
+      <div class="panel-content" id="viewContent" style="flex: 1;">
+        <div class="empty-state">Select an artifact to preview</div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API = 'http://localhost:8001';
+    let currentWorkspace = null;
+    let currentArtifact = null;
+    let currentView = 'preview';
+    let eventSource = null;
+    let events = [];
+
+    // Initialize
+    async function init() {
+      await loadWorkspaces();
+    }
+
+    async function loadWorkspaces() {
+      try {
+        const res = await fetch(`${API}/workspaces`);
+        const data = await res.json();
+        const select = document.getElementById('workspaceSelect');
+        select.innerHTML = '<option value="">Select workspace...</option>';
+        data.workspaces.forEach(ws => {
+          const opt = document.createElement('option');
+          opt.value = ws.id;
+          opt.textContent = ws.title;
+          select.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('Failed to load workspaces:', e);
+      }
+    }
+
+    async function createWorkspace() {
+      const title = prompt('Workspace name:', 'My Workspace');
+      if (!title) return;
+      try {
+        const res = await fetch(`${API}/workspaces`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title })
+        });
+        const ws = await res.json();
+        await loadWorkspaces();
+        document.getElementById('workspaceSelect').value = ws.id;
+        selectWorkspace(ws.id);
+      } catch (e) {
+        alert('Failed to create workspace');
+      }
+    }
+
+    document.getElementById('workspaceSelect').addEventListener('change', (e) => {
+      selectWorkspace(e.target.value);
+    });
+
+    function selectWorkspace(id) {
+      currentWorkspace = id;
+      currentArtifact = null;
+      events = [];
+      
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      
+      if (!id) {
+        document.getElementById('chatInput').disabled = true;
+        document.getElementById('sendBtn').disabled = true;
+        document.getElementById('chatMessages').innerHTML = '<div class="empty-state">Select a workspace to start chatting</div>';
+        document.getElementById('artifactList').innerHTML = '<div class="empty-state">No artifacts yet</div>';
+        document.getElementById('viewContent').innerHTML = '<div class="empty-state">Select an artifact to preview</div>';
+        document.getElementById('statusIndicator').textContent = 'Disconnected';
+        return;
+      }
+      
+      document.getElementById('chatInput').disabled = false;
+      document.getElementById('sendBtn').disabled = false;
+      document.getElementById('chatMessages').innerHTML = '';
+      
+      refreshArtifacts();
+      connectEventStream();
+    }
+
+    function connectEventStream() {
+      if (!currentWorkspace) return;
+      
+      eventSource = new EventSource(`${API}/workspaces/${currentWorkspace}/events/stream`);
+      
+      eventSource.onopen = () => {
+        document.getElementById('statusIndicator').textContent = '🟢 Connected';
+        document.getElementById('statusIndicator').style.color = '#22c55e';
+      };
+      
+      eventSource.onerror = () => {
+        document.getElementById('statusIndicator').textContent = '🔴 Disconnected';
+        document.getElementById('statusIndicator').style.color = '#ef4444';
+      };
+      
+      eventSource.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data);
+          events.push(event);
+          if (currentView === 'events') renderEvents();
+          
+          // Auto-refresh artifacts on changes
+          if (['artifact_created', 'artifact_updated', 'artifact_deleted'].includes(event.type)) {
+            refreshArtifacts();
+          }
+        } catch (err) {}
+      };
+      
+      // Named event handlers
+      ['artifact_created', 'artifact_updated', 'artifact_deleted', 'tool_call'].forEach(type => {
+        eventSource.addEventListener(type, (e) => {
+          try {
+            const event = JSON.parse(e.data);
+            events.push(event);
+            if (currentView === 'events') renderEvents();
+            if (['artifact_created', 'artifact_updated', 'artifact_deleted'].includes(type)) {
+              refreshArtifacts();
+            }
+          } catch (err) {}
+        });
+      });
+    }
+
+    async function refreshArtifacts() {
+      if (!currentWorkspace) return;
+      try {
+        const res = await fetch(`${API}/workspaces/${currentWorkspace}/artifacts`);
+        const data = await res.json();
+        const list = document.getElementById('artifactList');
+        
+        if (data.artifacts.length === 0) {
+          list.innerHTML = '<div class="empty-state">No artifacts yet</div>';
+          return;
+        }
+        
+        list.innerHTML = data.artifacts.map(a => `
+          <div class="artifact-item ${currentArtifact === a.id ? 'selected' : ''}" onclick="selectArtifact('${a.id}')">
+            <h3>${a.title || 'Untitled'}</h3>
+            <p>${a.type}</p>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error('Failed to load artifacts:', e);
+      }
+    }
+
+    async function selectArtifact(id) {
+      currentArtifact = id;
+      refreshArtifacts(); // Update selection UI
+      
+      try {
+        const res = await fetch(`${API}/workspaces/${currentWorkspace}/artifacts/${id}`);
+        const artifact = await res.json();
+        renderArtifactView(artifact);
+      } catch (e) {
+        console.error('Failed to load artifact:', e);
+      }
+    }
+
+    function renderArtifactView(artifact) {
+      const container = document.getElementById('viewContent');
+      
+      if (currentView === 'preview') {
+        if (artifact.type === 'text/html') {
+          container.innerHTML = `<div class="preview-frame"><iframe id="previewIframe"></iframe></div>`;
+          const iframe = document.getElementById('previewIframe');
+          iframe.srcdoc = artifact.content;
+        } else {
+          container.innerHTML = `<div class="preview-code">${escapeHtml(artifact.content)}</div>`;
+        }
+      } else if (currentView === 'code') {
+        container.innerHTML = `<div class="preview-code">${escapeHtml(artifact.content)}</div>`;
+      } else if (currentView === 'events') {
+        renderEvents();
+      }
+    }
+
+    function setView(view) {
+      currentView = view;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById('tab' + view.charAt(0).toUpperCase() + view.slice(1)).classList.add('active');
+      
+      if (view === 'events') {
+        renderEvents();
+      } else if (currentArtifact) {
+        selectArtifact(currentArtifact);
+      } else {
+        document.getElementById('viewContent').innerHTML = '<div class="empty-state">Select an artifact to preview</div>';
+      }
+    }
+
+    function renderEvents() {
+      const container = document.getElementById('viewContent');
+      if (events.length === 0) {
+        container.innerHTML = '<div class="empty-state">No events yet</div>';
+        return;
+      }
+      container.innerHTML = `<div class="events-log">${events.slice(-50).reverse().map(e => `
+        <div class="event-item ${e.type}">
+          <strong>${e.type}</strong> ${e.artifact_id ? `- ${e.artifact_id.slice(0,8)}...` : ''}
+          <br><span style="color:#666">${JSON.stringify(e.payload || {})}</span>
+        </div>
+      `).join('')}</div>`;
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('chatInput');
+      const message = input.value.trim();
+      if (!message || !currentWorkspace) return;
+      
+      input.value = '';
+      input.disabled = true;
+      document.getElementById('sendBtn').disabled = true;
+      
+      // Add user message
+      addMessage('user', message);
+      
+      // Create thinking indicator
+      const thinkingEl = addMessage('thinking', 'Thinking...');
+      
+      try {
+        const response = await fetch(`${API}/workspaces/${currentWorkspace}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message })
+        });
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let assistantContent = '';
+        let assistantEl = null;
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                
+                if (event.type === 'thinking_start') {
+                  thinkingEl.textContent = 'Thinking...';
+                } else if (event.type === 'thinking_end') {
+                  thinkingEl.style.display = 'none';
+                } else if (event.type === 'content') {
+                  if (!assistantEl) {
+                    assistantEl = addMessage('assistant', '');
+                  }
+                  assistantContent += event.content;
+                  assistantEl.textContent = assistantContent;
+                } else if (event.type === 'tool_call') {
+                  addMessage('tool', `🔧 ${event.tool_name}(${JSON.stringify(event.arguments).slice(0,100)}...)`);
+                } else if (event.type === 'tool_result') {
+                  addMessage('tool', `✅ ${event.result.message || JSON.stringify(event.result).slice(0,100)}`);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+        
+        // Remove thinking if still visible
+        if (thinkingEl.style.display !== 'none') {
+          thinkingEl.remove();
+        }
+        
+      } catch (e) {
+        thinkingEl.textContent = 'Error: ' + e.message;
+        thinkingEl.classList.remove('thinking');
+        thinkingEl.style.color = '#ef4444';
+      }
+      
+      input.disabled = false;
+      document.getElementById('sendBtn').disabled = false;
+      input.focus();
+    }
+
+    function addMessage(type, content) {
+      const container = document.getElementById('chatMessages');
+      const el = document.createElement('div');
+      el.className = `message ${type}`;
+      el.textContent = content;
+      container.appendChild(el);
+      container.scrollTop = container.scrollHeight;
+      return el;
+    }
+
+    async function clearMessages() {
+      if (!currentWorkspace) return;
+      try {
+        await fetch(`${API}/workspaces/${currentWorkspace}/messages`, { method: 'DELETE' });
+        document.getElementById('chatMessages').innerHTML = '';
+      } catch (e) {
+        console.error('Failed to clear messages:', e);
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    init();
+  </script>
+</body>
+</html>

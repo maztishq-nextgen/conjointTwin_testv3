@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Graph Workspace</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: #111;
+      padding: 10px 16px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 14px; font-weight: 600; }
+    header select, header button {
+      background: #222;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn-primary { background: #2563eb !important; border-color: #2563eb !important; }
+    
+    main { flex: 1; display: flex; overflow: hidden; }
+    
+    /* Left: Chat */
+    .chat-panel {
+      width: 400px;
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .message {
+      max-width: 90%;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .message.user { align-self: flex-end; background: #2563eb; }
+    .message.assistant { align-self: flex-start; background: #222; }
+    .message.thinking {
+      align-self: flex-start;
+      background: #1a1a2e;
+      border: 1px solid #3730a3;
+      color: #a5b4fc;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+      line-height: 1.5;
+    }
+    .message.reasoning {
+      align-self: flex-start;
+      background: #1e1b4b;
+      border: 1px solid #6366f1;
+      color: #c7d2fe;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow-y: auto;
+      line-height: 1.5;
+      padding: 12px;
+    }
+    .message.reasoning::before {
+      content: "🧠 Reasoning: ";
+      font-weight: bold;
+      color: #a5b4fc;
+    }
+    .message.tool {
+      align-self: flex-start;
+      background: #14532d;
+      border: 1px solid #22c55e;
+      font-family: monospace;
+      font-size: 11px;
+    }
+    .chat-input {
+      padding: 12px;
+      border-top: 1px solid #333;
+      display: flex;
+      gap: 8px;
+    }
+    .chat-input input {
+      flex: 1;
+      background: #222;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .chat-input button {
+      background: #2563eb;
+      border: none;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    
+    /* Right: Graph */
+    .graph-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #0a0a0a;
+    }
+    .graph-header {
+      padding: 10px 16px;
+      background: #111;
+      border-bottom: 1px solid #333;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .graph-canvas {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    #graphSvg {
+      width: 100%;
+      height: 100%;
+    }
+    .node {
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .node:hover { transform: scale(1.05); }
+    .node rect {
+      fill: #1e293b;
+      stroke: #3b82f6;
+      stroke-width: 2;
+      rx: 8;
+    }
+    .node.central rect { fill: #f59e0b; stroke: #fbbf24; }
+    .node text {
+      fill: #fff;
+      font-size: 11px;
+      font-family: -apple-system, sans-serif;
+    }
+    .edge {
+      stroke: #475569;
+      stroke-width: 2;
+      fill: none;
+    }
+    .edge.causal_positive { stroke: #22c55e; }
+    .edge.causal_negative { stroke: #ef4444; }
+    .edge-label {
+      fill: #94a3b8;
+      font-size: 9px;
+    }
+    marker { fill: #475569; }
+    .thinking-indicator {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: #1e1b4b;
+      border: 1px solid #4f46e5;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #a5b4fc;
+      display: none;
+    }
+    .thinking-indicator.active { display: block; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .pulse { animation: pulse 1.5s infinite; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧠 Graph Workspace</h1>
+    <select id="workspaceSelect"><option value="">Select workspace...</option></select>
+    <button onclick="createWorkspace()" class="btn-primary">+ New</button>
+    <span id="status" style="margin-left:auto;font-size:11px;color:#666;">Ready</span>
+  </header>
+  
+  <main>
+    <div class="chat-panel">
+      <div class="chat-messages" id="messages"></div>
+      <div class="chat-input">
+        <input type="text" id="input" placeholder="Ask to create a graph..." onkeypress="if(event.key==='Enter')send()" />
+        <button onclick="send()">Send</button>
+      </div>
+    </div>
+    
+    <div class="graph-panel">
+      <div class="graph-header" id="graphTitle">No graph loaded</div>
+      <div class="graph-canvas">
+        <div class="thinking-indicator" id="thinkingBox">
+          <span class="pulse">🧠</span> <span id="thinkingText">Thinking...</span>
+        </div>
+        <svg id="graphSvg">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#475569" />
+            </marker>
+            <marker id="arrowGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#22c55e" />
+            </marker>
+            <marker id="arrowRed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#ef4444" />
+            </marker>
+          </defs>
+          <g id="edgesGroup"></g>
+          <g id="nodesGroup"></g>
+        </svg>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API = 'http://localhost:8001';
+    let workspace = null;
+    let currentGraph = { nodes: [], edges: [] };
+    let nodePositions = {};
+
+    async function loadWorkspaces() {
+      const res = await fetch(`${API}/workspaces`);
+      const data = await res.json();
+      const sel = document.getElementById('workspaceSelect');
+      sel.innerHTML = '<option value="">Select workspace...</option>';
+      data.workspaces.forEach(w => {
+        sel.innerHTML += `<option value="${w.id}">${w.title}</option>`;
+      });
+    }
+
+    async function createWorkspace() {
+      const title = prompt('Name:', 'My Graph Workspace');
+      if (!title) return;
+      const res = await fetch(`${API}/workspaces`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title})
+      });
+      const w = await res.json();
+      await loadWorkspaces();
+      document.getElementById('workspaceSelect').value = w.id;
+      selectWorkspace(w.id);
+    }
+
+    document.getElementById('workspaceSelect').onchange = (e) => selectWorkspace(e.target.value);
+
+    function selectWorkspace(id) {
+      workspace = id;
+      currentGraph = { nodes: [], edges: [] };
+      nodePositions = {};
+      document.getElementById('messages').innerHTML = '';
+      clearGraph();
+      if (id) loadArtifacts();
+    }
+
+    async function loadArtifacts() {
+      try {
+        const res = await fetch(`${API}/workspaces/${workspace}/artifacts`);
+        const data = await res.json();
+        const graphs = (data.artifacts || []).filter(a => a.type === 'application/vnd.graph+json');
+        if (graphs.length > 0) {
+          // Load the most recent graph
+          const graph = graphs[graphs.length - 1];
+          const full = await fetch(`${API}/workspaces/${workspace}/artifacts/${graph.id}`).then(r => r.json());
+          try {
+            const graphData = JSON.parse(full.content || '{}');
+            document.getElementById('graphTitle').textContent = full.title || 'Graph';
+            currentGraph = graphData;
+            renderFullGraph();
+          } catch (parseErr) {
+            console.error('Failed to parse graph data:', parseErr);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load artifacts:', err);
+      }
+    }
+
+    function clearGraph() {
+      document.getElementById('nodesGroup').innerHTML = '';
+      document.getElementById('edgesGroup').innerHTML = '';
+      document.getElementById('graphTitle').textContent = 'No graph loaded';
+    }
+
+    async function send() {
+      const input = document.getElementById('input');
+      const msg = input.value.trim();
+      if (!msg || !workspace) return;
+      input.value = '';
+      
+      addMessage('user', msg);
+      // Don't clear graph here - only clear when a NEW graph is created (graph_created event)
+      
+      let reasoningEl = null;
+      let reasoningContent = '';
+      let assistantContent = '';
+      let assistantEl = null;
+      let isBeforeToolCall = true;
+      
+      document.getElementById('thinkingBox').classList.add('active');
+      document.getElementById('thinkingText').textContent = 'Analyzing...';
+      
+      try {
+        const res = await fetch(`${API}/workspaces/${workspace}/chat`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: msg})
+        });
+        
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+          const {done, value} = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, {stream: true});
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const e = JSON.parse(line.slice(6));
+                handleEvent(e, 
+                  () => {
+                    if (!reasoningEl && isBeforeToolCall) {
+                      reasoningEl = addMessage('reasoning', '');
+                    }
+                    return reasoningEl;
+                  },
+                  () => {
+                    if (!assistantEl) assistantEl = addMessage('assistant', '');
+                    return assistantEl;
+                  },
+                  () => { isBeforeToolCall = false; }
+                );
+              } catch (err) {}
+            }
+          }
+        }
+      } catch (err) {
+        addMessage('tool', 'Error: ' + err.message);
+      }
+      
+      document.getElementById('thinkingBox').classList.remove('active');
+    }
+
+    function handleEvent(e, getReasoningEl, getAssistantEl, markToolCalled) {
+      switch(e.type) {
+        case 'thinking_start':
+          document.getElementById('thinkingText').textContent = 'Reasoning...';
+          break;
+        case 'thinking_end':
+          break;
+        case 'tool_call':
+          markToolCalled();
+          addMessage('tool', `🔧 ${e.tool_name}`);
+          document.getElementById('thinkingText').textContent = `Calling ${e.tool_name}...`;
+          break;
+        case 'graph_created':
+          // Clear for new graph
+          currentGraph = { nodes: [], edges: [] };
+          nodePositions = {};
+          clearGraph();
+          document.getElementById('graphTitle').textContent = e.title || 'New Graph';
+          document.getElementById('thinkingText').textContent = 'Building graph...';
+          break;
+        case 'node_added':
+          addNode(e.node);
+          document.getElementById('thinkingText').textContent = `Added: ${e.node.label}`;
+          break;
+        case 'edge_added':
+          addEdge(e.edge);
+          break;
+        case 'graph_complete':
+          document.getElementById('thinkingText').textContent = 'Graph complete!';
+          setTimeout(() => layoutGraph(), 100);
+          break;
+        case 'node_deleted':
+          removeNode(e.node_id);
+          document.getElementById('thinkingText').textContent = `Removed: ${e.node_id}`;
+          break;
+        case 'edge_deleted':
+          removeEdge(e.source, e.target);
+          break;
+        case 'tool_result':
+          addMessage('tool', `✅ ${e.result.message || 'Done'}`);
+          break;
+        case 'content':
+          // Check if this is reasoning (before tool call) or final response (after)
+          const reasoningEl = getReasoningEl();
+          if (reasoningEl) {
+            reasoningEl.textContent += e.content;
+            reasoningEl.scrollTop = reasoningEl.scrollHeight;
+            // Update thinking indicator with snippet
+            const snippet = e.content.slice(0, 30).replace(/\n/g, ' ');
+            if (snippet.trim()) {
+              document.getElementById('thinkingText').textContent = snippet + '...';
+            }
+          } else {
+            const el = getAssistantEl();
+            el.textContent += e.content;
+            el.scrollIntoView({behavior: 'smooth', block: 'end'});
+          }
+          break;
+        case 'done':
+          break;
+      }
+    }
+
+    function addMessage(type, content) {
+      const container = document.getElementById('messages');
+      const el = document.createElement('div');
+      el.className = `message ${type}`;
+      el.textContent = content;
+      container.appendChild(el);
+      container.scrollTop = container.scrollHeight;
+      return el;
+    }
+
+    function addNode(node, skipPush = false) {
+      if (!skipPush) {
+        currentGraph.nodes.push(node);
+      }
+      
+      const svg = document.getElementById('graphSvg');
+      const width = svg.clientWidth || 800;
+      const height = svg.clientHeight || 600;
+      
+      // Radial/circular layout - L0 at absolute center, L1 around it, outer levels in concentric rings
+      let x, y;
+      const level = node.level !== undefined ? node.level : 0;
+      const nodesAtLevel = currentGraph.nodes.filter(n => (n.level !== undefined ? n.level : 0) === level);
+      const idx = nodesAtLevel.indexOf(node);
+      const count = nodesAtLevel.length;
+      
+      const centerX = width / 2;
+      const centerY = height / 2;
+      
+      if (level === 0) {
+        // L0 node at absolute center
+        x = centerX;
+        y = centerY;
+      } else if (level === 1) {
+        // L1 nodes in first ring around center
+        const radius = 120;
+        const angle = (idx / Math.max(nodesAtLevel.length, 1)) * 2 * Math.PI - Math.PI/2;
+        x = centerX + radius * Math.cos(angle);
+        y = centerY + radius * Math.sin(angle);
+      } else {
+        // Outer levels in concentric rings
+        const radius = 120 + (level) * 100;
+        const angle = (idx / Math.max(nodesAtLevel.length, 1)) * 2 * Math.PI - Math.PI/2;
+        x = centerX + radius * Math.cos(angle);
+        y = centerY + radius * Math.sin(angle);
+      }
+      
+      nodePositions[node.id] = {x, y};
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('transform', `translate(${x}, ${y})`);
+      g.setAttribute('id', `node-${node.id}`);
+      
+      // Style based on level
+      const nodeWidth = Math.max(100, node.label.length * 7 + 20);
+      const nodeHeight = level === 0 ? 50 : level === 1 ? 44 : level === 2 ? 36 : 30;
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', -nodeWidth/2);
+      rect.setAttribute('y', -nodeHeight/2);
+      rect.setAttribute('width', nodeWidth);
+      rect.setAttribute('height', nodeHeight);
+      rect.setAttribute('rx', level === 0 ? 25 : level === 1 ? 22 : 8);
+      
+      // Color by level (L0=gold, L1=purple, L2=blue, L3=teal, L4+=green)
+      const levelColors = {
+        0: { fill: '#ca8a04', stroke: '#fbbf24' },
+        1: { fill: '#7c3aed', stroke: '#a78bfa' },
+        2: { fill: '#1e40af', stroke: '#3b82f6' },
+        3: { fill: '#0f766e', stroke: '#14b8a6' },
+        4: { fill: '#166534', stroke: '#22c55e' },
+      };
+      const colors = levelColors[level] || levelColors[4];
+      rect.setAttribute('fill', colors.fill);
+      rect.setAttribute('stroke', colors.stroke);
+      rect.setAttribute('stroke-width', level === 0 ? '3' : '2');
+      
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dy', '4');
+      text.textContent = node.label;
+      
+      g.appendChild(rect);
+      g.appendChild(text);
+      svg.appendChild(g);
+      
+      // Animate in
+      g.style.opacity = '0';
+      g.style.transform = `translate(${x}px, ${y}px) scale(0.5)`;
+      requestAnimationFrame(() => {
+        g.style.transition = 'all 0.3s ease-out';
+        g.style.opacity = '1';
+        g.style.transform = `translate(${x}px, ${y}px) scale(1)`;
+      });
+    }
+
+    function addEdge(edge) {
+      currentGraph.edges.push(edge);
+      updateEdges();
+    }
+
+    function removeNode(nodeId) {
+      // Remove from data
+      currentGraph.nodes = currentGraph.nodes.filter(n => n.id !== nodeId);
+      currentGraph.edges = currentGraph.edges.filter(e => e.source !== nodeId && e.target !== nodeId);
+      delete nodePositions[nodeId];
+      
+      // Remove from DOM with animation
+      const g = document.getElementById(`node-${nodeId}`);
+      if (g) {
+        g.style.transition = 'all 0.3s ease-out';
+        g.style.opacity = '0';
+        g.style.transform += ' scale(0.5)';
+        setTimeout(() => g.remove(), 300);
+      }
+      
+      // Update edges
+      setTimeout(() => updateEdges(), 100);
+    }
+
+    function removeEdge(source, target) {
+      currentGraph.edges = currentGraph.edges.filter(e => !(e.source === source && e.target === target));
+      updateEdges();
+    }
+
+    function updateEdges() {
+      const svg = document.getElementById('edgesGroup');
+      svg.innerHTML = '';
+      
+      for (const edge of currentGraph.edges) {
+        const src = nodePositions[edge.source];
+        const tgt = nodePositions[edge.target];
+        if (!src || !tgt) continue;
+        
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', src.x);
+        line.setAttribute('y1', src.y);
+        line.setAttribute('x2', tgt.x);
+        line.setAttribute('y2', tgt.y);
+        line.setAttribute('class', `edge ${edge.relationship_type || ''}`);
+        
+        const marker = edge.relationship_type === 'causal_positive' ? 'arrowGreen' :
+                       edge.relationship_type === 'causal_negative' ? 'arrowRed' : 'arrow';
+        line.setAttribute('marker-end', `url(#${marker})`);
+        
+        svg.appendChild(line);
+        
+        // Edge label
+        if (edge.relationship_type) {
+          const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          label.setAttribute('x', (src.x + tgt.x) / 2);
+          label.setAttribute('y', (src.y + tgt.y) / 2 - 5);
+          label.setAttribute('class', 'edge-label');
+          label.setAttribute('text-anchor', 'middle');
+          const symbol = edge.relationship_type === 'causal_positive' ? '+' :
+                        edge.relationship_type === 'causal_negative' ? '−' : '';
+          label.textContent = symbol;
+          svg.appendChild(label);
+        }
+      }
+    }
+
+    function layoutGraph() {
+      // Simple force-directed layout
+      const nodes = currentGraph.nodes;
+      const edges = currentGraph.edges;
+      if (nodes.length === 0) return;
+      
+      const width = document.getElementById('graphSvg').clientWidth;
+      const height = document.getElementById('graphSvg').clientHeight;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      
+      // Initialize positions in a circle
+      const radius = Math.min(width, height) * 0.35;
+      nodes.forEach((node, i) => {
+        const angle = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
+        nodePositions[node.id] = {
+          x: centerX + radius * Math.cos(angle),
+          y: centerY + radius * Math.sin(angle)
+        };
+      });
+      
+      // Simple force simulation (few iterations)
+      for (let iter = 0; iter < 50; iter++) {
+        // Repulsion between all nodes
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const a = nodePositions[nodes[i].id];
+            const b = nodePositions[nodes[j].id];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+            const force = 5000 / (dist * dist);
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            a.x -= fx; a.y -= fy;
+            b.x += fx; b.y += fy;
+          }
+        }
+        
+        // Attraction along edges
+        for (const edge of edges) {
+          const a = nodePositions[edge.source];
+          const b = nodePositions[edge.target];
+          if (!a || !b) continue;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+          const force = (dist - 150) * 0.05;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          a.x += fx; a.y += fy;
+          b.x -= fx; b.y -= fy;
+        }
+        
+        // Keep in bounds
+        for (const node of nodes) {
+          const p = nodePositions[node.id];
+          p.x = Math.max(80, Math.min(width - 80, p.x));
+          p.y = Math.max(40, Math.min(height - 40, p.y));
+        }
+      }
+      
+      // Update node positions with animation
+      for (const node of nodes) {
+        const g = document.getElementById(`node-${node.id}`);
+        if (g) {
+          const p = nodePositions[node.id];
+          g.style.transition = 'transform 0.5s ease-out';
+          g.setAttribute('transform', `translate(${p.x}, ${p.y})`);
+        }
+      }
+      
+      setTimeout(() => updateEdges(), 50);
+    }
+
+    function renderFullGraph() {
+      clearGraph();
+      nodePositions = {};
+      
+      // Handle old graphs that might not have nodes/edges arrays
+      if (!currentGraph.nodes) currentGraph.nodes = [];
+      if (!currentGraph.edges) currentGraph.edges = [];
+      
+      // Infer levels from edges if nodes don't have levels
+      inferLevelsFromEdges();
+      
+      // Render existing nodes (skipPush=true to avoid duplicating)
+      for (const node of currentGraph.nodes) {
+        addNode(node, true);
+      }
+      
+      // Render edges
+      updateEdges();
+    }
+    
+    function inferLevelsFromEdges() {
+      // Check if nodes already have explicit levels (including level 0)
+      const hasLevels = currentGraph.nodes.some(n => n.level !== undefined && n.level !== null);
+      if (hasLevels) return;
+      
+      // Build parent-child map from edges
+      const children = {};  // parent -> [children]
+      const parents = {};   // child -> parent
+      
+      for (const edge of currentGraph.edges) {
+        if (!children[edge.source]) children[edge.source] = [];
+        children[edge.source].push(edge.target);
+        parents[edge.target] = edge.source;
+      }
+      
+      // Find root nodes (nodes with no parent)
+      const roots = currentGraph.nodes.filter(n => !parents[n.id]);
+      
+      // If no clear hierarchy, spread nodes in a grid
+      if (roots.length === 0 || roots.length === currentGraph.nodes.length) {
+        // No hierarchy - assign levels in a spiral/grid pattern
+        const cols = Math.ceil(Math.sqrt(currentGraph.nodes.length));
+        currentGraph.nodes.forEach((node, i) => {
+          node.level = Math.floor(i / cols) + 1;
+        });
+        return;
+      }
+      
+      // BFS to assign levels
+      const visited = new Set();
+      let queue = roots.map(n => ({ id: n.id, level: 1 }));
+      
+      while (queue.length > 0) {
+        const { id, level } = queue.shift();
+        if (visited.has(id)) continue;
+        visited.add(id);
+        
+        const node = currentGraph.nodes.find(n => n.id === id);
+        if (node) node.level = level;
+        
+        const childIds = children[id] || [];
+        for (const childId of childIds) {
+          if (!visited.has(childId)) {
+            queue.push({ id: childId, level: level + 1 });
+          }
+        }
+      }
+      
+      // Assign level 1 to any unvisited nodes
+      for (const node of currentGraph.nodes) {
+        if (!node.level) node.level = 1;
+      }
+    }
+
+    loadWorkspaces();
+  </script>
+</body>
+</html>

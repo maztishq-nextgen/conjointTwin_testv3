@@ -1,0 +1,495 @@
+---
+title: "Artifacts Workspace API Reference"
+description: "Create workspaces, chat with AI, manage artifacts, and stream events."
+---
+
+## Overview
+Use this API to create workspaces, chat with the AI, store artifacts, and stream events in real time. The API is designed for clients that render changes as they happen.
+
+## Base URL
+```
+http://localhost:8001
+```
+
+## Authentication
+No authentication required by default. For production, add Bearer token authentication via an API gateway.
+
+<Note>
+All endpoints return JSON except SSE streams which return `text/event-stream`.
+</Note>
+
+## Data model
+Artifacts can store graph data using `application/vnd.graph+json`.
+
+The graph is stored inside the artifact `content` field as a JSON string. That JSON contains `graph_type`, `nodes`, and `edges`.
+
+<ResponseExample title="Graph JSON stored in artifact content">
+```json
+{
+  "graph_type": "mind_map",
+  "nodes": [
+    { "id": "central_batteries", "label": "Battery Technology", "level": 0 },
+    { "id": "core_manufacturing", "label": "Manufacturing", "level": 1 },
+    { "id": "core_chemistry", "label": "Chemistry", "level": 1 },
+    { "id": "branch_materials", "label": "Materials", "level": 2 },
+    { "id": "detail_cathode", "label": "Cathode chemistry", "level": 3 }
+  ],
+  "edges": [
+    { "id": "central_batteries_core_manufacturing", "source": "central_batteries", "target": "core_manufacturing", "relationship_type": "contains" },
+    { "id": "central_batteries_core_chemistry", "source": "central_batteries", "target": "core_chemistry", "relationship_type": "contains" },
+    { "id": "core_manufacturing_branch_materials", "source": "core_manufacturing", "target": "branch_materials", "relationship_type": "contains" },
+    { "id": "branch_materials_detail_cathode", "source": "branch_materials", "target": "detail_cathode", "relationship_type": "contains" }
+  ],
+  "metadata": {
+    "created_by": "assistant"
+  }
+}
+```
+</ResponseExample>
+
+<ResponseField path="graph_type" type="string">
+Graph type, e.g. `mind_map`.
+</ResponseField>
+<ResponseField path="nodes" type="array">
+List of nodes.
+</ResponseField>
+<Expandable title="nodes[]">
+  <ResponseField path="nodes[].id" type="string">Descriptive node ID (e.g., 'central_topic', 'core_concept_1').</ResponseField>
+  <ResponseField path="nodes[].label" type="string">Short display label (2-5 words).</ResponseField>
+  <ResponseField path="nodes[].level" type="integer">Hierarchy level: 0=central topic, 1=core concepts, 2=branches, 3=details, 4+=deeper.</ResponseField>
+</Expandable>
+<ResponseField path="edges" type="array">
+List of edges.
+</ResponseField>
+<Expandable title="edges[]">
+  <ResponseField path="edges[].id" type="string">Edge ID.</ResponseField>
+  <ResponseField path="edges[].source" type="string">Source node ID.</ResponseField>
+  <ResponseField path="edges[].target" type="string">Target node ID.</ResponseField>
+  <ResponseField path="edges[].relationship_type" type="string">Relationship type.</ResponseField>
+</Expandable>
+
+## Workspaces
+### Create a workspace
+Creates a new workspace and emits a `workspace_created` event.
+
+<ParamField body="title" type="string" required>
+Workspace title.
+</ParamField>
+<ParamField body="project_id" type="string">
+Optional project ID.
+</ParamField>
+<ParamField body="owner_id" type="string">
+Optional owner identifier.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS -X POST http://localhost:8001/workspaces \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Research Hub"}'
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "title": "Research Hub",
+  "project_id": null,
+  "owner_id": null,
+  "created_at": "2026-01-15T10:00:00Z",
+  "updated_at": "2026-01-15T10:00:00Z"
+}
+```
+</ResponseExample>
+
+### List workspaces
+
+<ParamField query="owner_id" type="string">
+Filter by owner ID.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS http://localhost:8001/workspaces
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "workspaces": [
+    {
+      "id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+      "title": "Research Hub",
+      "project_id": null,
+      "owner_id": null,
+      "created_at": "2026-01-15T10:00:00Z",
+      "updated_at": "2026-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Get a workspace
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "title": "Research Hub",
+  "project_id": null,
+  "owner_id": null,
+  "created_at": "2026-01-15T10:00:00Z",
+  "updated_at": "2026-01-15T10:00:00Z"
+}
+```
+</ResponseExample>
+
+## Chat
+### Stream chat responses
+Streams SSE events as the AI generates mind maps.
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+<ParamField body="message" type="string" required>
+User message for the AI.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -N -X POST http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Create a mind map for battery manufacturing"}'
+```
+</RequestExample>
+
+<ResponseExample>
+```text
+event: thinking_start
+data: {"type":"thinking_start","content":""}
+
+event: content
+data: {"type":"content","content":"I will map the core stages..."}
+
+event: tool_call
+data: {"type":"tool_call","tool_name":"create_graph","arguments":{"title":"Battery manufacturing","graph_type":"mind_map"}}
+```
+</ResponseExample>
+
+### List chat messages
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+<ParamField query="limit" type="integer">
+Max number of messages (default 50).
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/messages?limit=20
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Create a mind map for battery manufacturing",
+      "tool_calls": null,
+      "tool_call_id": null,
+      "created_at": "2026-01-15T10:01:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Clear chat history
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -X DELETE http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/messages
+```
+</RequestExample>
+
+<ResponseExample>
+```text
+204 No Content
+```
+</ResponseExample>
+
+## Artifacts
+### Create an artifact
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+<ParamField body="type" type="string" required>
+Artifact MIME type (e.g., `application/vnd.graph+json`).
+</ParamField>
+<ParamField body="title" type="string">
+Artifact title.
+</ParamField>
+<ParamField body="content" type="string" required>
+Artifact content as JSON string.
+</ParamField>
+<ParamField body="created_by" type="string">
+Creator identifier.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS -X POST http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/artifacts \
+  -H "Content-Type: application/json" \
+  -d '{"type":"application/vnd.graph+json","title":"Battery Map","content":"{\"graph_type\":\"mind_map\",\"nodes\":[{\"id\":\"l1\",\"label\":\"Battery manufacturing\",\"level\":1}],\"edges\":[],\"metadata\":{}}"}'
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+  "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "type": "application/vnd.graph+json",
+  "title": "Battery Map",
+  "content": "{\"graph_type\":\"mind_map\",\"nodes\":[{\"id\":\"l1\",\"label\":\"Battery manufacturing\",\"level\":1}],\"edges\":[],\"metadata\":{}}",
+  "version_id": "b2e2bd4a-02a3-4c0f-8a2f-9dfb1c1a7e0a",
+  "created_at": "2026-01-15T10:02:00Z",
+  "updated_at": "2026-01-15T10:02:00Z"
+}
+```
+</ResponseExample>
+
+### List artifacts
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/artifacts
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "artifacts": [
+    {
+      "id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+      "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+      "type": "application/vnd.graph+json",
+      "title": "Battery Map",
+      "latest_version_id": "b2e2bd4a-02a3-4c0f-8a2f-9dfb1c1a7e0a",
+      "created_at": "2026-01-15T10:02:00Z",
+      "updated_at": "2026-01-15T10:02:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Get an artifact
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+<ParamField path="artifact_id" type="string" required>
+Artifact ID.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/artifacts/e40bd128-22ef-4f14-8149-a46ba19cea4e
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+  "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "type": "application/vnd.graph+json",
+  "title": "Battery Map",
+  "content": "{\"nodes\":[],\"edges\":[],\"graph_type\":\"mind_map\"}",
+  "version_id": "b2e2bd4a-02a3-4c0f-8a2f-9dfb1c1a7e0a",
+  "created_at": "2026-01-15T10:02:00Z",
+  "updated_at": "2026-01-15T10:02:00Z"
+}
+```
+</ResponseExample>
+
+### Update an artifact
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+<ParamField path="artifact_id" type="string" required>
+Artifact ID.
+</ParamField>
+<ParamField body="content" type="string" required>
+New content for the artifact.
+</ParamField>
+<ParamField body="created_by" type="string">
+Optional creator identifier.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS -X PUT http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/artifacts/e40bd128-22ef-4f14-8149-a46ba19cea4e \
+  -H "Content-Type: application/json" \
+  -d '{"content":"{\"nodes\":[{\"id\":\"central_topic\",\"label\":\"Manufacturing\",\"level\":0}],\"edges\":[],\"graph_type\":\"mind_map\"}"}'
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "id": "e40bd128-22ef-4f14-8149-a46ba19cea4e",
+  "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "type": "application/vnd.graph+json",
+  "title": "Battery Map",
+  "content": "{\"nodes\":[{\"id\":\"l1\",\"label\":\"Manufacturing\",\"level\":1}],\"edges\":[],\"graph_type\":\"mind_map\"}",
+  "version_id": "b2e2bd4a-02a3-4c0f-8a2f-9dfb1c1a7e0a",
+  "created_at": "2026-01-15T10:02:00Z",
+  "updated_at": "2026-01-15T10:04:00Z"
+}
+```
+</ResponseExample>
+
+### Delete an artifact
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+<ParamField path="artifact_id" type="string" required>
+Artifact ID.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -X DELETE http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/artifacts/e40bd128-22ef-4f14-8149-a46ba19cea4e
+```
+</RequestExample>
+
+<ResponseExample>
+```text
+204 No Content
+```
+</ResponseExample>
+
+## Events
+### List events
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+<ParamField query="since_id" type="integer">
+Only return events after this ID.
+</ParamField>
+<ParamField query="limit" type="integer">
+Max number of events (default 100).
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/events?limit=50
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "events": [
+    {
+      "id": 1,
+      "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+      "type": "workspace_created",
+      "artifact_id": null,
+      "payload": {"title":"Research Hub","project_id":null},
+      "created_at": "2026-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Create an event
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+<ParamField body="type" type="string" required>
+Event type name.
+</ParamField>
+<ParamField body="payload" type="object">
+Event payload.
+</ParamField>
+<ParamField body="artifact_id" type="string">
+Associated artifact ID.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -sS -X POST http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/events \
+  -H "Content-Type: application/json" \
+  -d '{"type":"custom_event","payload":{"status":"ok"}}'
+```
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "id": 12,
+  "workspace_id": "7b138f6c-2220-4e3e-9c90-2dfe4c9444c9",
+  "type": "custom_event",
+  "artifact_id": null,
+  "payload": {"status":"ok"},
+  "created_at": "2026-01-15T10:05:00Z"
+}
+```
+</ResponseExample>
+
+### Stream events
+
+<ParamField path="workspace_id" type="string" required>
+Workspace ID.
+</ParamField>
+<ParamField query="since_id" type="integer">
+Start streaming after this event ID.
+</ParamField>
+
+<RequestExample>
+```bash
+curl -N http://localhost:8001/workspaces/7b138f6c-2220-4e3e-9c90-2dfe4c9444c9/events/stream
+```
+</RequestExample>
+
+<ResponseExample>
+```text
+id: 12
+event: custom_event
+data: {"id":12,"workspace_id":"7b138f6c-2220-4e3e-9c90-2dfe4c9444c9","type":"custom_event","artifact_id":null,"payload":{"status":"ok"},"created_at":"2026-01-15T10:05:00Z"}
+```
+</ResponseExample>
