@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 data/
 *.sqlite
+.env
+.env.local
+.env.*.local
