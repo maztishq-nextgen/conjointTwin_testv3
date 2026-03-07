@@ -242,6 +242,22 @@ TOOL_DEFINITIONS_RESPONSES = [
             "required": ["url"],
         },
     },
+    {
+        "type": "function",
+        "name": "update_node",
+        "description": "Update an existing node's properties (label, type, description). Use this to rename nodes, change their type, or add descriptions.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {"type": "string", "description": "ID of the graph"},
+                "node_id": {"type": "string", "description": "ID of the node to update"},
+                "label": {"type": "string", "description": "New display label (2-5 words)"},
+                "type": {"type": "string", "description": "Node type (e.g., 'concept', 'variable', 'factor')"},
+                "description": {"type": "string", "description": "Detailed description of the node"},
+            },
+            "required": ["artifact_id", "node_id"],
+        },
+    },
 ]
 
 

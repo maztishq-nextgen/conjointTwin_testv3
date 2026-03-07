@@ -850,7 +850,7 @@
           break;
         case 'thinking_end':
           break;
-        case 'reasoning':
+        case 'reasoning': {
           // Stream actual reasoning content from OpenAI
           const reasoningEl = getReasoningEl();
           if (reasoningEl) {
@@ -858,6 +858,7 @@
             reasoningEl.scrollTop = reasoningEl.scrollHeight;
           }
           break;
+        }
         case 'url_fetching':
           addMessage('tool', `🌐 Fetching URL: ${e.url}`);
           document.getElementById('thinkingText').textContent = `Fetching ${e.url}...`;
@@ -868,7 +869,7 @@
         case 'url_fetch_error':
           addMessage('tool', `❌ URL fetch failed: ${e.error}`);
           break;
-        case 'file_search_call':
+        case 'file_search_call': {
           const status = e.status || '';
           const queries = e.queries || [];
           if (queries.length > 0) {
@@ -876,7 +877,8 @@
           }
           document.getElementById('thinkingText').textContent = status === 'searching' ? 'Searching documents...' : 'File search complete';
           break;
-        case 'annotations':
+        }
+        case 'annotations': {
           // Handle file citations from search results
           if (e.annotations && e.annotations.length > 0) {
             const citations = e.annotations.map(a => a.filename || a.file_id).filter(Boolean);
@@ -885,6 +887,7 @@
             }
           }
           break;
+        }
         case 'tool_call':
           markToolCalled();
           addMessage('tool', `🔧 ${e.tool_name}`);
@@ -919,7 +922,7 @@
         case 'tool_result':
           addMessage('tool', `✅ ${e.result.message || 'Done'}`);
           break;
-        case 'content':
+        case 'content': {
           // Check if this is reasoning (before tool call) or final response (after)
           const reasoningEl = getReasoningEl();
           if (reasoningEl) {
@@ -936,6 +939,7 @@
             el.scrollIntoView({behavior: 'smooth', block: 'end'});
           }
           break;
+        }
         case 'done':
           break;
       }

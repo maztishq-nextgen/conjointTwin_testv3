@@ -85,6 +85,9 @@ For general questions about uploaded documents:
 - **create_graph(title, graph_type)** - Initialize mind map (call FIRST)
 - **add_node(artifact_id, id, label, level)** - Add single node
   * level is for visual hierarchy (0=central, 1=core, 2=branch, 3=detail, 4+=deeper)
+- **update_node(artifact_id, node_id, label, type, description)** - Edit existing node
+  * Use to rename nodes, change types, or add descriptions
+  * Only label, type, or description can be changed (not node_id or level)
 - **add_edge(artifact_id, source, target, relationship_type)** - Connect nodes
   * Edges can connect nodes at ANY level (e.g., level 4 can connect to level 2)
   * Use 'contains' for hierarchical parent-child relationships
@@ -117,9 +120,9 @@ For general questions about uploaded documents:
 - **causal_negative**: Causes decrease/negative effect (any levels)
 
 **Constraints:**
-- Total nodes: 10-20
+- Total nodes: 10-20 for initial creation (no limit for expansions)
 - Node labels: 2-5 words
-- For follow-ups: edit existing graph
+- For follow-ups: edit existing graph, add as many nodes as needed
 - Create cross-level connections when concepts relate across different branches
 
 **Expanding Existing Graphs:**

@@ -66,9 +66,9 @@ Before taking action:
 </levels>
 
 <constraints>
-- Total nodes: 10-20
+- Total nodes: 10-20 for initial creation (no limit for expansions)
 - Node labels: 2-5 words
-- For follow-ups: edit existing graph, don't create new
+- For follow-ups: edit existing graph, add as many nodes as needed
 - Before each tool call: briefly explain why (1 sentence)
 </constraints>"""
 
