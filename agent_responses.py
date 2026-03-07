@@ -1,4 +1,6 @@
 import json
+import time as time_module
+import asyncio
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import openai
@@ -148,6 +150,99 @@ class ChatAgentResponses:
         self.client = openai.OpenAI(api_key=OPENAI_API_KEY)
         self.tool_executor = ToolExecutor(store, workspace_id)
 
+    async def _wait_for_files_ready(
+        self, 
+        max_wait_seconds: int = 120,
+        poll_interval: int = 5
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Wait for files in vector stores to be indexed by OpenAI.
+        
+        Yields status updates while polling. Returns when all files are ready
+        or timeout is reached.
+        """
+        # Get all vector stores for this workspace
+        vector_stores = self.store.list_vector_stores(self.workspace_id)
+        if not vector_stores:
+            return
+        
+        # Get all files in these vector stores
+        all_files = []
+        for vs in vector_stores:
+            files = self.store.list_vector_store_files(vs["id"])
+            all_files.extend(files)
+        
+        if not all_files:
+            return
+        
+        # Check which files are still processing (recent uploads)
+        files_to_check = []
+        for file in all_files:
+            # Check files uploaded in last 5 minutes (300 seconds)
+            created_at = file.get("created_at", "")
+            if created_at:
+                try:
+                    from datetime import datetime, timezone
+                    file_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                    now = datetime.now(timezone.utc)
+                    age_seconds = (now - file_time).total_seconds()
+                    if age_seconds < 300:  # File is less than 5 min old
+                        files_to_check.append(file)
+                except:
+                    pass
+        
+        if not files_to_check:
+            return
+        
+        # Poll OpenAI for file status
+        start_time = time_module.time()
+        files_still_processing = True
+        
+        while files_still_processing and (time_module.time() - start_time) < max_wait_seconds:
+            files_still_processing = False
+            processing_count = 0
+            
+            for file in files_to_check:
+                try:
+                    # Get file status from OpenAI
+                    openai_file = self.client.files.retrieve(file["openai_file_id"])
+                    if openai_file.status != "processed":
+                        files_still_processing = True
+                        processing_count += 1
+                except Exception:
+                    # If we can't check, assume it's still processing
+                    files_still_processing = True
+                    processing_count += 1
+            
+            if files_still_processing:
+                # Calculate remaining time
+                elapsed = int(time_module.time() - start_time)
+                remaining = max(0, max_wait_seconds - elapsed)
+                
+                yield {
+                    "type": "files_indexing",
+                    "status": "in_progress",
+                    "files_processing": processing_count,
+                    "elapsed_seconds": elapsed,
+                    "estimated_remaining": remaining
+                }
+                
+                # Wait before checking again
+                await asyncio.sleep(poll_interval)
+        
+        # Final status
+        if files_still_processing:
+            yield {
+                "type": "files_indexing",
+                "status": "timeout",
+                "message": "Files are still processing. Proceeding without file search."
+            }
+        else:
+            yield {
+                "type": "files_indexing",
+                "status": "completed",
+                "message": "All files indexed and ready for search."
+            }
+
     async def chat_stream(
         self,
         user_message: str,
@@ -191,6 +286,11 @@ class ChatAgentResponses:
             full_message = user_message
             if url_content:
                 full_message = f"{user_message}\n\n[Content from {url}]\n{url_content}"
+            
+            # Wait for files to be indexed if file search is enabled
+            if enable_file_search:
+                async for status_event in self._wait_for_files_ready():
+                    yield status_event
             
             # Get stored response ID for conversation continuity
             stored_response_id = self.store.get_last_response_id(self.workspace_id)

@@ -278,7 +278,41 @@ File citations from search results.
 
 **UI Action:** Display citation badges
 
-### 13. `done`
+### 14. `files_indexing`
+Status updates while waiting for uploaded files to be indexed by OpenAI.
+
+**While processing:**
+```json
+{
+  "type": "files_indexing",
+  "status": "in_progress",
+  "files_processing": 2,
+  "elapsed_seconds": 10,
+  "estimated_remaining": 110
+}
+```
+
+**When complete:**
+```json
+{
+  "type": "files_indexing",
+  "status": "completed",
+  "message": "All files indexed and ready for search."
+}
+```
+
+**On timeout (after 2 minutes):**
+```json
+{
+  "type": "files_indexing",
+  "status": "timeout",
+  "message": "Files are still processing. Proceeding without file search."
+}
+```
+
+**UI Action:** Show progress indicator "Indexing files... (10s / 120s)"
+
+### 15. `done`
 Stream complete.
 ```json
 { "type": "done" }
