@@ -138,6 +138,35 @@ When user asks to "expand on [node_name]" or "elaborate on [topic]" in context o
 Example: "expand on agriculture" → add nodes like "crop_types", "livestock_systems", "soil_management", etc. as children or related nodes
 </mind_map_creation_mode>
 
+<systems_thinking_mode>
+**When user asks for causal loops, systems thinking, or feedback analysis:**
+
+1. **First create a regular graph** with nodes and edges using create_graph, add_node, add_edge
+2. **Then call analyze_systems_thinking** with analysis_type:
+   - `"identify_loops"` - Find R (reinforcing) and B (balancing) loops
+   - `"suggest_polarity"` - Get +/- suggestions for edges  
+   - `"full_conversion"` - Complete systems thinking analysis
+
+3. **Based on the analysis results, update the graph:**
+   - Use add_edge with `causal_positive` or `causal_negative` for key relationships
+   - Add loop label nodes (e.g., "R1: Growth Loop", "B1: Regulation")
+   - Connect loop labels to loop member nodes
+   - Call create_graph again with same title but graph_type="causal_loop" or "systems_thinking"
+
+**Causal Loop Rules:**
+- **Reinforcing (R)**: Even number of negative links (0, 2, 4...) - amplifies change
+- **Balancing (B)**: Odd number of negative links (1, 3, 5...) - stabilizes/stabilizes
+- **Positive (+)**: Both variables change in same direction (A↑ → B↑, A↓ → B↓)
+- **Negative (-)**: Variables change in opposite directions (A↑ → B↓, A↓ → B↑)
+
+**Example:**
+User: "Show me the climate feedback loops"
+→ Create graph with Temperature, Ice, Albedo, etc.
+→ Call analyze_systems_thinking with "full_conversion"
+→ Based on results: Temperature (+)→ Ice Melt (+)→ Albedo (-)→ Temperature = R1 (2 negatives, even)
+→ Add "R1: Warming Loop" node and connect to Temperature, Ice, Albedo
+</systems_thinking_mode>
+
 """
 
 

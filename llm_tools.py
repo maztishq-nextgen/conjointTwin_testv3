@@ -258,6 +258,23 @@ TOOL_DEFINITIONS_RESPONSES = [
             "required": ["artifact_id", "node_id"],
         },
     },
+    {
+        "type": "function",
+        "name": "analyze_systems_thinking",
+        "description": "Analyze existing nodes and edges to identify causal loops and systems thinking patterns. This tool reads the current graph, identifies reinforcing (R) and balancing (B) feedback loops, and suggests causal relationships with polarity (+/-). Use this to convert a regular graph into a causal loop diagram or systems thinking map.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {"type": "string", "description": "ID of the graph to analyze"},
+                "analysis_type": {
+                    "type": "string",
+                    "enum": ["identify_loops", "suggest_polarity", "full_conversion"],
+                    "description": "Type of analysis: 'identify_loops' finds feedback loops, 'suggest_polarity' suggests +/- for edges, 'full_conversion' does complete systems thinking conversion"
+                },
+            },
+            "required": ["artifact_id", "analysis_type"],
+        },
+    },
 ]
 
 
@@ -301,6 +318,8 @@ class ToolExecutor:
             return self._list_graphs()
         elif tool_name == "fetch_url":
             return self._fetch_url(arguments)
+        elif tool_name == "analyze_systems_thinking":
+            return self._analyze_systems_thinking(arguments)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
 
@@ -736,8 +755,315 @@ class ToolExecutor:
                 "error": f"Failed to fetch URL: {str(e)}",
                 "url": url,
             }
+
+    def _analyze_systems_thinking(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze graph for causal loops and systems thinking patterns.
+        
+        This tool reads the current graph and provides analysis for the LLM to:
+        1. Identify feedback loops (reinforcing and balancing)
+        2. Count negative links to determine loop polarity
+        3. Suggest causal relationships with +/- polarity
+        4. Provide recommendations for systems thinking conversion
+        
+        The actual edge updates must be done via add_edge calls by the LLM.
+        """
+        artifact_id = args.get("artifact_id")
+        analysis_type = args.get("analysis_type", "full_conversion")
+        
+        # Get current graph state
+        graph_result = self._get_graph({"artifact_id": artifact_id})
+        if "error" in graph_result:
+            return graph_result
+        
+        nodes = graph_result.get("nodes", [])
+        edges = graph_result.get("edges", [])
+        
+        if not nodes:
+            return {"error": "No nodes found in graph", "artifact_id": artifact_id}
+        
+        # Build adjacency list for loop detection
+        adjacency = {}
+        node_map = {n["id"]: n for n in nodes}
+        
+        for edge in edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            rel_type = edge.get("relationship_type", "related")
+            
+            if source not in adjacency:
+                adjacency[source] = []
+            adjacency[source].append({
+                "target": target,
+                "relationship": rel_type,
+                "edge": edge
+            })
+        
+        # Find all simple cycles (feedback loops)
+        loops = []
+        visited = set()
+        
+        def find_loops(start, current, path, edge_path):
+            if current in visited and current == start and len(path) > 1:
+                # Found a cycle
+                loops.append({
+                    "nodes": path.copy(),
+                    "edges": edge_path.copy(),
+                    "length": len(path)
+                })
+                return
+            
+            if current in visited:
+                return
+            
+            visited.add(current)
+            
+            if current in adjacency:
+                for conn in adjacency[current]:
+                    next_node = conn["target"]
+                    # Avoid going back immediately
+                    if len(path) == 1 or next_node != path[-2]:
+                        path.append(next_node)
+                        edge_path.append(conn)
+                        find_loops(start, next_node, path, edge_path)
+                        path.pop()
+                        edge_path.pop()
+            
+            if current != start:
+                visited.remove(current)
+        
+        # Find loops from each node
+        for node_id in node_map.keys():
+            visited.clear()
+            find_loops(node_id, node_id, [node_id], [])
+        
+        # Analyze loops for polarity
+        loop_analysis = []
+        for loop in loops:
+            # Count negative relationships
+            negative_count = 0
+            for conn in loop["edges"]:
+                rel = conn.get("relationship", "")
+                if rel in ["causal_negative"]:
+                    negative_count += 1
+            
+            # Determine loop type
+            is_reinforcing = negative_count % 2 == 0
+            loop_type = "reinforcing" if is_reinforcing else "balancing"
+            
+            loop_analysis.append({
+                "nodes": loop["nodes"],
+                "type": loop_type,
+                "negative_links": negative_count,
+                "description": f"{'R' if is_reinforcing else 'B'} loop: {' → '.join(loop['nodes'])}"
+            })
+        
+        # Identify nodes that could be stocks vs flows
+        stock_candidates = []
+        flow_candidates = []
+        
+        for node in nodes:
+            node_id = node.get("id", "")
+            label = node.get("label", "").lower()
+            
+            # Look for accumulation keywords
+            stock_keywords = ["amount", "level", "total", "count", "population", "inventory", "balance"]
+            flow_keywords = ["rate", "speed", "growth", "input", "output", "inflow", "outflow"]
+            
+            if any(kw in label for kw in stock_keywords):
+                stock_candidates.append(node_id)
+            elif any(kw in label for kw in flow_keywords):
+                flow_candidates.append(node_id)
+        
+        # Suggest causal polarities for edges without clear causation
+        polarity_suggestions = []
+        
+        for edge in edges:
+            rel_type = edge.get("relationship_type", "")
+            source = edge.get("source")
+            target = edge.get("target")
+            
+            # If edge is generic 'related' or 'influences', suggest polarity
+            if rel_type in ["related", "influences", "contains"]:
+                source_node = node_map.get(source, {})
+                target_node = node_map.get(target, {})
+                
+                # Analyze typical causation patterns
+                # This is a heuristic - the LLM should use domain knowledge
+                suggestion = {
+                    "edge": edge,
+                    "suggested_polarity": None,
+                    "reasoning": ""
+                }
+                
+                # Check if source could drive target positively
+                source_label = source_node.get("label", "").lower()
+                target_label = target_node.get("label", "").lower()
+                
+                # Simple heuristics
+                if "more" in source_label or "increase" in source_label:
+                    suggestion["suggested_polarity"] = "causal_positive"
+                    suggestion["reasoning"] = f"More {source_label} likely increases {target_label}"
+                elif "less" in source_label or "decrease" in source_label:
+                    suggestion["suggested_polarity"] = "causal_negative"
+                    suggestion["reasoning"] = f"Less {source_label} likely decreases {target_label}"
+                
+                if suggestion["suggested_polarity"]:
+                    polarity_suggestions.append(suggestion)
+        
+        # Prepare result
+        result = {
+            "success": True,
+            "artifact_id": artifact_id,
+            "analysis_type": analysis_type,
+            "graph_summary": {
+                "total_nodes": len(nodes),
+                "total_edges": len(edges),
+                "node_ids": [n["id"] for n in nodes],
+            },
+            "loops_found": len(loop_analysis),
+            "loop_analysis": loop_analysis[:10],  # Limit to 10 loops
+            "stock_candidates": stock_candidates,
+            "flow_candidates": flow_candidates,
+            "polarity_suggestions": polarity_suggestions[:20],  # Limit suggestions
+            "recommendations": []
+        }
+        
+        # Add specific recommendations based on analysis type
+        if analysis_type == "identify_loops":
+            result["recommendations"].append(
+                f"Found {len(loop_analysis)} feedback loops. Review loop_analysis to see R (reinforcing) and B (balancing) loops."
+            )
+        
+        elif analysis_type == "suggest_polarity":
+            if polarity_suggestions:
+                result["recommendations"].append(
+                    f"Found {len(polarity_suggestions)} edges that could be converted to causal_positive or causal_negative."
+                )
+                result["recommendations"].append(
+                    "Use update_node to add descriptions explaining the causal relationship."
+                )
+        
+        elif analysis_type == "full_conversion":
+            result["recommendations"].append(
+                "To convert to systems thinking: 1) Use add_edge with causal_positive/causal_negative for key relationships"
+            )
+            result["recommendations"].append(
+                "2) Create loop labels (R1, R2, B1) as new nodes connected to loop members"
+            )
+            result["recommendations"].append(
+                "3) Update graph_type to 'causal_loop' or 'systems_thinking' using create_graph with same title"
+            )
+            result["recommendations"].append(
+                f"4) Found {len(stock_candidates)} potential stocks and {len(flow_candidates)} potential flows"
+            )
+        
+        # Emit incremental event
+        self._emit_incremental("systems_analysis_complete", {
+            "artifact_id": artifact_id,
+            "loops_found": len(loop_analysis),
+            "analysis_type": analysis_type
+        })
+        
+        return result
+
+    def _fetch_url(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Fetch and extract text content from a URL with pagination support."""
+        url = args.get("url")
+        chunk_index = args.get("chunk_index", 0)
+        chunk_size = args.get("chunk_size", 15000)
+        
+        if not url:
+            return {"error": "No URL provided"}
+        
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            import math
+            
+            # Check if we already have this URL cached
+            if url not in self.url_cache:
+                # Fetch the URL for the first time
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (compatible; WorkspaceBot/1.0)"
+                }
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()
+                
+                # Parse HTML and extract text
+                soup = BeautifulSoup(response.content, 'html.parser')
+                
+                # Remove script and style elements
+                for script in soup(["script", "style", "nav", "footer", "header"]):
+                    script.decompose()
+                
+                # Get text
+                text = soup.get_text(separator='\n', strip=True)
+                
+                # Clean up whitespace
+                lines = (line.strip() for line in text.splitlines())
+                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                full_text = '\n'.join(chunk for chunk in chunks if chunk)
+                
+                # Get page title
+                title = soup.title.string if soup.title else "Untitled"
+                
+                # Cache the full content
+                self.url_cache[url] = {
+                    "title": title,
+                    "full_text": full_text,
+                    "total_length": len(full_text),
+                }
+                
+                self._emit_incremental("url_fetched", {
+                    "url": url,
+                    "title": title,
+                    "total_length": len(full_text),
+                })
+            
+            # Get cached data
+            cached = self.url_cache[url]
+            full_text = cached["full_text"]
+            title = cached["title"]
+            total_length = cached["total_length"]
+            
+            # Calculate chunking
+            total_chunks = math.ceil(total_length / chunk_size)
+            
+            # Validate chunk_index
+            if chunk_index < 0 or chunk_index >= total_chunks:
+                return {
+                    "error": f"Invalid chunk_index {chunk_index}. Valid range: 0-{total_chunks - 1}",
+                    "url": url,
+                    "total_chunks": total_chunks,
+                }
+            
+            # Extract the requested chunk
+            start_pos = chunk_index * chunk_size
+            end_pos = min(start_pos + chunk_size, total_length)
+            chunk_content = full_text[start_pos:end_pos]
+            
+            # Emit event for chunk retrieval
+            if chunk_index > 0:
+                self._emit_incremental("url_chunk_retrieved", {
+                    "url": url,
+                    "chunk_index": chunk_index,
+                    "chunk_size": len(chunk_content),
+                })
+            
+            return {
+                "success": True,
+                "url": url,
+                "title": title,
+                "content": chunk_content,
+                "chunk_index": chunk_index,
+                "chunk_size": len(chunk_content),
+                "total_chunks": total_chunks,
+                "total_length": total_length,
+                "has_more": chunk_index < total_chunks - 1,
+            }
+            
         except Exception as e:
             return {
-                "error": f"Failed to process URL: {str(e)}",
+                "error": f"Failed to fetch URL: {str(e)}",
                 "url": url,
             }
